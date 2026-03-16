@@ -132,7 +132,8 @@ class _PdfPreviewScreenState extends State<PdfPreviewScreen> {
         pageFling: true,
         pageSnap: true,
         fitPolicy: FitPolicy.BOTH,
-        nightMode: true,
+        nightMode: false,
+        backgroundColor: const Color(0xFFFFFFFF),
         onRender: (pages) {
           if (mounted) setState(() => _totalPages = pages ?? 0);
         },

@@ -1,10 +1,28 @@
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../models/vault_file.dart';
 import '../models/vault_folder.dart';
 import 'api_service.dart';
 import 'crypto_service.dart';
+
+/// Represents an in-progress upload.
+class UploadTask {
+  final String id;
+  final String fileName;
+  double progress; // 0.0 to 1.0
+  String status; // 'encrypting', 'uploading', 'saving', 'done', 'error'
+  String? error;
+
+  UploadTask({
+    required this.id,
+    required this.fileName,
+    this.progress = 0.0,
+    this.status = 'encrypting',
+    this.error,
+  });
+}
 
 /// Central state manager for the vault.
 class VaultProvider extends ChangeNotifier {
@@ -16,9 +34,11 @@ class VaultProvider extends ChangeNotifier {
   String? _error;
   String _currentFolder = 'inbox';
   VaultFile? _selectedFile;
+  bool _sidebarOpen = false;
 
   List<VaultFile> _files = [];
   List<VaultFolder> _folders = [];
+  List<UploadTask> _uploadQueue = [];
 
   // Getters
   bool get isUnlocked => _keyBytes != null;
@@ -30,6 +50,10 @@ class VaultProvider extends ChangeNotifier {
   List<VaultFolder> get folders => _folders;
   Uint8List? get keyBytes => _keyBytes;
   String? get authPassword => _authPassword;
+  bool get sidebarOpen => _sidebarOpen;
+  List<UploadTask> get uploadQueue => List.unmodifiable(_uploadQueue);
+  bool get hasActiveUploads =>
+      _uploadQueue.any((t) => t.status != 'done' && t.status != 'error');
 
   /// Files filtered to current folder view.
   List<VaultFile> get currentFiles {
@@ -48,6 +72,18 @@ class VaultProvider extends ChangeNotifier {
   List<VaultFolder> childrenOf(String parentId) =>
       _folders.where((f) => f.parentId == parentId).toList();
 
+  void toggleSidebar() {
+    _sidebarOpen = !_sidebarOpen;
+    notifyListeners();
+  }
+
+  void closeSidebar() {
+    if (_sidebarOpen) {
+      _sidebarOpen = false;
+      notifyListeners();
+    }
+  }
+
   /// Unlock vault with master password.
   Future<bool> unlock(String password) async {
     try {
@@ -59,7 +95,17 @@ class VaultProvider extends ChangeNotifier {
       _authPassword = password;
       _api = ApiService(authPassword: password);
 
-      // Test auth by fetching files
+      // Try loading from cache first for instant unlock
+      final cached = await _loadFromCache();
+      if (cached) {
+        _isLoading = false;
+        notifyListeners();
+        // Then sync from server in background
+        _fetchData(silent: true);
+        return true;
+      }
+
+      // No cache — fetch from server
       await _fetchData();
       return true;
     } catch (e) {
@@ -73,9 +119,96 @@ class VaultProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> _fetchData() async {
-    _isLoading = true;
-    notifyListeners();
+  // ── Offline Cache ──
+
+  static const String _cacheKeyFiles = 'vault_cached_files';
+  static const String _cacheKeyFolders = 'vault_cached_folders';
+  static const String _cacheKeyTimestamp = 'vault_cache_ts';
+
+  Future<bool> _loadFromCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final filesJson = prefs.getString(_cacheKeyFiles);
+      final foldersJson = prefs.getString(_cacheKeyFolders);
+      if (filesJson == null || foldersJson == null) return false;
+
+      final filesList = jsonDecode(filesJson) as List<dynamic>;
+      _files = filesList.map<VaultFile>((raw) {
+        final m = raw as Map<String, dynamic>;
+        return VaultFile.fromDecryptedMeta(
+          id: m['id'] as String,
+          cloudinaryUrl: m['cloudinaryUrl'] as String,
+          meta: m['meta'] as Map<String, dynamic>,
+          fallbackDate: m['fallbackDate'] as String,
+        );
+      }).toList();
+
+      final foldersList = jsonDecode(foldersJson) as List<dynamic>;
+      _folders = foldersList.map<VaultFolder>((raw) {
+        final m = raw as Map<String, dynamic>;
+        return VaultFolder.fromDecryptedMeta(
+          id: m['id'] as String,
+          meta: m['meta'] as Map<String, dynamic>,
+          fallbackDate: m['fallbackDate'] as String,
+        );
+      }).toList();
+
+      return _files.isNotEmpty || _folders.isNotEmpty;
+    } catch (e) {
+      debugPrint('Cache load failed: $e');
+      return false;
+    }
+  }
+
+  Future<void> _saveToCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      final filesData = _files
+          .map(
+            (f) => {
+              'id': f.id,
+              'cloudinaryUrl': f.cloudinaryUrl,
+              'meta': f.toMetadataJson(),
+              'fallbackDate': f.dateAdded,
+            },
+          )
+          .toList();
+      await prefs.setString(_cacheKeyFiles, jsonEncode(filesData));
+
+      final foldersData = _folders
+          .map(
+            (f) => {
+              'id': f.id,
+              'meta': f.toMetadataJson(),
+              'fallbackDate': f.dateAdded,
+            },
+          )
+          .toList();
+      await prefs.setString(_cacheKeyFolders, jsonEncode(foldersData));
+      await prefs.setString(
+        _cacheKeyTimestamp,
+        DateTime.now().toIso8601String(),
+      );
+    } catch (e) {
+      debugPrint('Cache save failed: $e');
+    }
+  }
+
+  Future<void> clearCache() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_cacheKeyFiles);
+    await prefs.remove(_cacheKeyFolders);
+    await prefs.remove(_cacheKeyTimestamp);
+  }
+
+  // ── Data Fetching ──
+
+  Future<void> _fetchData({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      notifyListeners();
+    }
 
     try {
       // Fetch and decrypt files
@@ -138,8 +271,13 @@ class VaultProvider extends ChangeNotifier {
       _folders = decryptedFolders;
 
       _error = null;
+
+      // Save to cache for offline use
+      await _saveToCache();
     } catch (e) {
-      _error = 'Failed to load vault data: $e';
+      if (!silent) {
+        _error = 'Failed to load vault data: $e';
+      }
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -152,6 +290,7 @@ class VaultProvider extends ChangeNotifier {
   void setCurrentFolder(String folderId) {
     _currentFolder = folderId;
     _selectedFile = null;
+    _sidebarOpen = false;
     notifyListeners();
   }
 
@@ -247,60 +386,127 @@ class VaultProvider extends ChangeNotifier {
         fallbackDate: DateTime.now().toIso8601String(),
       ),
     );
+    await _saveToCache();
     notifyListeners();
   }
 
-  /// Upload a new file.
+  // ── Non-blocking Upload Queue ──
+
+  /// Upload a new file (non-blocking — adds to queue and runs in background).
   Future<void> uploadFile(
     Uint8List fileBytes,
     String fileName,
     String mimeType,
   ) async {
-    // 1. Encrypt the file
-    final result = CryptoService.encryptFileBytes(fileBytes, _keyBytes!);
-    final encryptedBytes = result['encryptedBytes'] as Uint8List;
-    final iv = result['iv'] as Uint8List;
+    final taskId = const Uuid().v4();
+    final task = UploadTask(id: taskId, fileName: fileName);
+    _uploadQueue.add(task);
+    notifyListeners();
 
-    // 2. Upload encrypted blob
-    final cloudinaryUrl = await _api!.uploadEncryptedBlob(encryptedBytes);
+    // Run upload asynchronously (non-blocking)
+    _processUpload(task, fileBytes, fileName, mimeType);
+  }
 
-    // 3. Create metadata
-    final newId = const Uuid().v4();
-    final meta = {
-      'originalName': fileName,
-      'originalType': mimeType,
-      'size': fileBytes.length,
-      'folderId': _currentFolder == 'starred' || _currentFolder == 'trash'
-          ? 'inbox'
-          : _currentFolder,
-      'fileIv': iv.toList(),
-      'starred': false,
-      'description': '',
-      'properties': <Map<String, String>>[],
-      'dateAdded': DateTime.now().toIso8601String(),
-    };
+  /// Upload multiple files (batch).
+  Future<void> uploadFiles(List<Map<String, dynamic>> filesToUpload) async {
+    for (final entry in filesToUpload) {
+      final bytes = entry['bytes'] as Uint8List;
+      final name = entry['name'] as String;
+      final mime = entry['mime'] as String;
+      await uploadFile(bytes, name, mime);
+      // Small delay between queuing to avoid overwhelming
+      await Future.delayed(const Duration(milliseconds: 100));
+    }
+  }
 
-    // 4. Encrypt metadata
-    final encryptedMeta = CryptoService.encryptMetadata(meta, _keyBytes!);
+  Future<void> _processUpload(
+    UploadTask task,
+    Uint8List fileBytes,
+    String fileName,
+    String mimeType,
+  ) async {
+    try {
+      // Step 1: Encrypt
+      task.status = 'encrypting';
+      task.progress = 0.1;
+      notifyListeners();
 
-    // 5. Save to DB
-    await _api!.createFile(
-      id: newId,
-      encryptedMetadata: encryptedMeta['data'] as String,
-      metadataIv: jsonEncode(encryptedMeta['iv']),
-      cloudinaryUrl: cloudinaryUrl,
-    );
+      final result = CryptoService.encryptFileBytes(fileBytes, _keyBytes!);
+      final encryptedBytes = result['encryptedBytes'] as Uint8List;
+      final iv = result['iv'] as Uint8List;
 
-    // 6. Update local state
-    _files.insert(
-      0,
-      VaultFile.fromDecryptedMeta(
+      task.progress = 0.3;
+      notifyListeners();
+
+      // Step 2: Upload encrypted blob
+      task.status = 'uploading';
+      task.progress = 0.4;
+      notifyListeners();
+
+      final cloudinaryUrl = await _api!.uploadEncryptedBlob(encryptedBytes);
+
+      task.progress = 0.8;
+      notifyListeners();
+
+      // Step 3: Create metadata
+      task.status = 'saving';
+      task.progress = 0.9;
+      notifyListeners();
+
+      final newId = const Uuid().v4();
+      final meta = {
+        'originalName': fileName,
+        'originalType': mimeType,
+        'size': fileBytes.length,
+        'folderId': _currentFolder == 'starred' || _currentFolder == 'trash'
+            ? 'inbox'
+            : _currentFolder,
+        'fileIv': iv.toList(),
+        'starred': false,
+        'description': '',
+        'properties': <Map<String, String>>[],
+        'dateAdded': DateTime.now().toIso8601String(),
+      };
+
+      final encryptedMeta = CryptoService.encryptMetadata(meta, _keyBytes!);
+
+      await _api!.createFile(
         id: newId,
+        encryptedMetadata: encryptedMeta['data'] as String,
+        metadataIv: jsonEncode(encryptedMeta['iv']),
         cloudinaryUrl: cloudinaryUrl,
-        meta: meta,
-        fallbackDate: DateTime.now().toIso8601String(),
-      ),
-    );
+      );
+
+      // Step 4: Update local state
+      _files.insert(
+        0,
+        VaultFile.fromDecryptedMeta(
+          id: newId,
+          cloudinaryUrl: cloudinaryUrl,
+          meta: meta,
+          fallbackDate: DateTime.now().toIso8601String(),
+        ),
+      );
+
+      task.status = 'done';
+      task.progress = 1.0;
+      await _saveToCache();
+      notifyListeners();
+
+      // Remove completed task after a delay
+      Future.delayed(const Duration(seconds: 3), () {
+        _uploadQueue.removeWhere((t) => t.id == task.id);
+        notifyListeners();
+      });
+    } catch (e) {
+      task.status = 'error';
+      task.error = e.toString();
+      notifyListeners();
+    }
+  }
+
+  void dismissUploadTask(String taskId) {
+    _uploadQueue.removeWhere((t) => t.id == taskId);
     notifyListeners();
   }
 
@@ -325,6 +531,7 @@ class VaultProvider extends ChangeNotifier {
         fallbackDate: DateTime.now().toIso8601String(),
       ),
     );
+    await _saveToCache();
     notifyListeners();
   }
 
@@ -351,6 +558,7 @@ class VaultProvider extends ChangeNotifier {
     if (_selectedFile?.id == updated.id) {
       _selectedFile = updated;
     }
+    await _saveToCache();
     notifyListeners();
   }
 
@@ -367,5 +575,19 @@ class VaultProvider extends ChangeNotifier {
     if (builtins.containsKey(folderId)) return builtins[folderId]!;
     final f = _folders.where((f) => f.id == folderId).firstOrNull;
     return f?.name ?? folderId;
+  }
+
+  /// Lock the vault and clear all sensitive data.
+  void lock() {
+    _keyBytes = null;
+    _authPassword = null;
+    _api = null;
+    _files = [];
+    _folders = [];
+    _selectedFile = null;
+    _currentFolder = 'inbox';
+    _uploadQueue = [];
+    _sidebarOpen = false;
+    notifyListeners();
   }
 }

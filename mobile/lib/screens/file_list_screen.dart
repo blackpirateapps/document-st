@@ -14,6 +14,8 @@ class FileListScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isWide = MediaQuery.of(context).size.width >= 600;
+
     return Consumer<VaultProvider>(
       builder: (context, vault, _) {
         if (vault.isLoading) {
@@ -48,6 +50,36 @@ class FileListScreen extends StatelessWidget {
                       color: AppTheme.separator.withOpacity(0.3),
                     ),
                   ),
+                  // Hamburger menu on mobile
+                  leading: isWide
+                      ? null
+                      : CupertinoButton(
+                          padding: EdgeInsets.zero,
+                          onPressed: () => vault.toggleSidebar(),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              const Icon(
+                                CupertinoIcons.line_horizontal_3,
+                                size: 24,
+                              ),
+                              // Upload indicator badge
+                              if (vault.hasActiveUploads)
+                                Positioned(
+                                  top: -2,
+                                  right: -4,
+                                  child: Container(
+                                    width: 8,
+                                    height: 8,
+                                    decoration: const BoxDecoration(
+                                      color: AppTheme.accentBlue,
+                                      shape: BoxShape.circle,
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
                   trailing: CupertinoButton(
                     padding: EdgeInsets.zero,
                     onPressed: () => vault.refresh(),
@@ -64,6 +96,8 @@ class FileListScreen extends StatelessWidget {
                           Icon(
                             vault.currentFolder == 'starred'
                                 ? CupertinoIcons.star
+                                : vault.currentFolder == 'trash'
+                                ? CupertinoIcons.trash
                                 : CupertinoIcons.folder,
                             size: 48,
                             color: AppTheme.textTertiary,
@@ -71,11 +105,23 @@ class FileListScreen extends StatelessWidget {
                           const SizedBox(height: 16),
                           Text(
                             vault.currentFolder == 'starred'
-                                ? 'No starred files.'
-                                : 'No files in this folder.',
+                                ? 'No starred files'
+                                : vault.currentFolder == 'trash'
+                                ? 'Trash is empty'
+                                : 'No files in this folder',
                             style: const TextStyle(
                               color: AppTheme.textTertiary,
                               fontSize: 15,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            vault.currentFolder == 'starred'
+                                ? 'Star files to find them quickly'
+                                : 'Tap + to upload a file',
+                            style: const TextStyle(
+                              color: AppTheme.textTertiary,
+                              fontSize: 13,
                             ),
                           ),
                         ],
@@ -130,33 +176,24 @@ class FileListScreen extends StatelessWidget {
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.any,
+        allowMultiple: true,
         withData: true,
       );
       if (result == null || result.files.isEmpty) return;
-      final pickedFile = result.files.first;
-      if (pickedFile.bytes == null) return;
 
-      // Show loading indicator
-      if (!context.mounted) return;
-      showCupertinoDialog(
-        context: context,
-        barrierDismissible: false,
-        builder: (ctx) =>
-            const Center(child: CupertinoActivityIndicator(radius: 16)),
-      );
-
-      final mimeType =
-          lookupMimeType(pickedFile.name) ?? 'application/octet-stream';
-      await vault.uploadFile(
-        Uint8List.fromList(pickedFile.bytes!),
-        pickedFile.name,
-        mimeType,
-      );
-
-      if (context.mounted) Navigator.pop(context); // Dismiss loading
+      // Queue all files for non-blocking upload
+      for (final pickedFile in result.files) {
+        if (pickedFile.bytes == null) continue;
+        final mimeType =
+            lookupMimeType(pickedFile.name) ?? 'application/octet-stream';
+        await vault.uploadFile(
+          Uint8List.fromList(pickedFile.bytes!),
+          pickedFile.name,
+          mimeType,
+        );
+      }
     } catch (e) {
       if (context.mounted) {
-        Navigator.pop(context); // Dismiss loading
         _showError(context, 'Upload failed: $e');
       }
     }
@@ -183,6 +220,25 @@ class _FileRow extends StatelessWidget {
   final VaultFile file;
   const _FileRow({required this.file});
 
+  IconData _fileIcon(String mimeType) {
+    if (mimeType.contains('pdf')) return CupertinoIcons.doc_text_fill;
+    if (mimeType.contains('image')) return CupertinoIcons.photo_fill;
+    if (mimeType.contains('video')) return CupertinoIcons.videocam_fill;
+    if (mimeType.contains('audio')) return CupertinoIcons.music_note_2;
+    if (mimeType.contains('zip') || mimeType.contains('archive')) {
+      return CupertinoIcons.archivebox_fill;
+    }
+    return CupertinoIcons.doc_fill;
+  }
+
+  Color _fileColor(String mimeType) {
+    if (mimeType.contains('pdf')) return const Color(0xFFFF453A);
+    if (mimeType.contains('image')) return const Color(0xFF30D158);
+    if (mimeType.contains('video')) return const Color(0xFFBF5AF2);
+    if (mimeType.contains('audio')) return const Color(0xFFFF9F0A);
+    return AppTheme.accentBlue;
+  }
+
   @override
   Widget build(BuildContext context) {
     final vault = context.read<VaultProvider>();
@@ -190,6 +246,8 @@ class _FileRow extends StatelessWidget {
       'MMM d, yyyy',
     ).format(DateTime.parse(file.dateAdded));
     final isPdf = file.originalType == 'application/pdf';
+    final icon = _fileIcon(file.originalType);
+    final color = _fileColor(file.originalType);
 
     return GestureDetector(
       onTap: () {
@@ -228,17 +286,13 @@ class _FileRow extends StatelessWidget {
             ),
             // File icon
             Container(
-              width: 36,
-              height: 36,
+              width: 40,
+              height: 40,
               decoration: BoxDecoration(
-                color: AppTheme.fillTertiary,
-                borderRadius: BorderRadius.circular(8),
+                color: color.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(10),
               ),
-              child: Icon(
-                isPdf ? CupertinoIcons.doc_text_fill : CupertinoIcons.doc_fill,
-                size: 18,
-                color: AppTheme.accentBlue,
-              ),
+              child: Icon(icon, size: 20, color: color),
             ),
             const SizedBox(width: 12),
             // File info
@@ -297,28 +351,56 @@ class _FileRow extends StatelessWidget {
                   ),
                 );
               },
-              child: const Text('Preview'),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(CupertinoIcons.eye, size: 18),
+                  SizedBox(width: 8),
+                  Text('Preview'),
+                ],
+              ),
             ),
           CupertinoActionSheetAction(
             onPressed: () {
               Navigator.pop(ctx);
               vault.selectFile(file);
             },
-            child: const Text('Details'),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.info_circle, size: 18),
+                SizedBox(width: 8),
+                Text('Details'),
+              ],
+            ),
           ),
           CupertinoActionSheetAction(
             onPressed: () {
               Navigator.pop(ctx);
               _showRenameDialog(context, vault);
             },
-            child: const Text('Rename'),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.pencil, size: 18),
+                SizedBox(width: 8),
+                Text('Rename'),
+              ],
+            ),
           ),
           CupertinoActionSheetAction(
             onPressed: () {
               Navigator.pop(ctx);
               _showMoveDialog(context, vault);
             },
-            child: const Text('Move'),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.folder, size: 18),
+                SizedBox(width: 8),
+                Text('Move'),
+              ],
+            ),
           ),
           CupertinoActionSheetAction(
             onPressed: () async {
@@ -327,7 +409,14 @@ class _FileRow extends StatelessWidget {
                 await vault.copyFile(file);
               } catch (_) {}
             },
-            child: const Text('Copy'),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.doc_on_doc, size: 18),
+                SizedBox(width: 8),
+                Text('Copy'),
+              ],
+            ),
           ),
           CupertinoActionSheetAction(
             isDestructiveAction: true,
@@ -338,7 +427,14 @@ class _FileRow extends StatelessWidget {
                 await vault.trashFile(file);
               }
             },
-            child: const Text('Move to Trash'),
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.trash, size: 18, color: AppTheme.dangerRed),
+                SizedBox(width: 8),
+                Text('Move to Trash'),
+              ],
+            ),
           ),
         ],
         cancelButton: CupertinoActionSheetAction(
@@ -433,13 +529,28 @@ class _FileRow extends StatelessWidget {
                     await vault.moveFile(file, f['id']!);
                   }
                 },
-                child: Text(
-                  f['name']!,
-                  style: TextStyle(
-                    fontWeight: f['id'] == file.folderId
-                        ? FontWeight.w700
-                        : FontWeight.w400,
-                  ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      f['id'] == file.folderId
+                          ? CupertinoIcons.checkmark_circle_fill
+                          : CupertinoIcons.folder,
+                      size: 18,
+                      color: f['id'] == file.folderId
+                          ? AppTheme.accentBlue
+                          : AppTheme.textSecondary,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      f['name']!,
+                      style: TextStyle(
+                        fontWeight: f['id'] == file.folderId
+                            ? FontWeight.w700
+                            : FontWeight.w400,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             )

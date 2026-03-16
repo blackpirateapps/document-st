@@ -193,6 +193,7 @@ The mobile app code is **written but not yet tested/built**. It must be built in
 - **File Picker:** `file_picker`
 - **UUIDs:** `uuid`
 - **Path Utilities:** `path`
+- **Offline Cache:** `shared_preferences`
 
 ### Project Structure
 ```
@@ -223,13 +224,14 @@ mobile/
     ├── services/
     │   ├── crypto_service.dart     # AES-GCM + PBKDF2 (PointyCastle). CRITICAL FILE.
     │   ├── api_service.dart        # HTTP client for all Vercel API endpoints
-    │   └── vault_provider.dart     # ChangeNotifier: unlock, fetch, decrypt, CRUD, star, move
+    │   └── vault_provider.dart     # ChangeNotifier: unlock, fetch, decrypt, CRUD, star, move, offline cache, upload queue, sidebar state, lock
     └── screens/
         ├── unlock_screen.dart      # Master password input
-        ├── home_screen.dart        # Main layout: sidebar + content area
-        ├── file_list_screen.dart   # File list with star, upload, actions, PDF click-to-preview
-        ├── file_detail_screen.dart # Detail view: description, properties, metadata, save
-        └── pdf_preview_screen.dart # Decrypt-and-view PDF via flutter_pdfview
+        ├── home_screen.dart        # Main layout: responsive sidebar/drawer + content area + upload progress
+        ├── file_list_screen.dart   # File list with star, multi-file upload, colored icons, actions, PDF click-to-preview
+        ├── file_detail_screen.dart # Redesigned detail view: hero card, quick actions, frosted-glass sections, sticky save
+        ├── pdf_preview_screen.dart # Decrypt-and-view PDF via flutter_pdfview (nightMode fixed)
+        └── settings_screen.dart    # Settings: batch upload, sync, clear cache, lock vault, about
 ```
 
 ### Key Mobile Files
@@ -259,15 +261,22 @@ HTTP client targeting `https://document-st.vercel.app`:
 
 #### `lib/services/vault_provider.dart`
 ChangeNotifier that manages all app state:
-- Holds `_keyBytes`, `_password`, `_files`, `_folders`, `_currentFolderId`, `_selectedFile`.
-- `unlock(password)` — authenticates, derives key, fetches & decrypts all data.
-- CRUD operations: `uploadFile`, `renameFile`, `moveFile`, `copyFile`, `trashFile`, `toggleStar`, `createFolder`, `deleteFolder`.
-- All mutations re-encrypt metadata and PUT/POST to the API.
+- Holds `_keyBytes`, `_password`, `_files`, `_folders`, `_currentFolderId`, `_selectedFile`, `_sidebarOpen`, `_uploadQueue`.
+- `unlock(password)` — authenticates, derives key. Loads cached vault data from `shared_preferences` first for instant unlock, then syncs from server in background.
+- CRUD operations: `uploadFile`, `uploadFiles` (batch), `renameFile`, `moveFile`, `copyFile`, `trashFile`, `toggleStar`, `createFolder`, `deleteFolder`.
+- All mutations re-encrypt metadata and PUT/POST to the API, then call `_saveToCache()` to persist locally.
+- **Offline caching:** Uses `shared_preferences` with keys `vault_cached_files`, `vault_cached_folders`, `vault_cache_ts`. Decrypted vault data is cached as JSON after every mutation.
+- **Upload queue:** `UploadTask` class tracks `id`, `fileName`, `progress`, `status` (encrypting/uploading/saving/done/error), `error`. `_processUpload()` runs asynchronously and non-blocking. Completed tasks auto-dismiss after 3 seconds.
+- **Sidebar state:** `sidebarOpen`, `toggleSidebar()`, `closeSidebar()` — controls the mobile drawer.
+- **Lock:** `lock()` clears all sensitive data (key, password, files, folders, cache) from memory.
 
 #### `lib/screens/home_screen.dart`
-Main layout with:
-- Left sidebar: folder tree (recursive with expand/collapse), default folders (All Files, Starred, Trash), create folder dialog.
-- Right content area: switches between `FileListScreen`, `FileDetailScreen` based on `selectedFile` state.
+Main layout with responsive behavior:
+- **Wide screens (>=600px):** Permanent left sidebar.
+- **Phone screens (<600px):** Overlay drawer with dark backdrop, opened via hamburger menu button in `file_list_screen.dart`.
+- Sidebar contents: folder tree (recursive with expand/collapse), default folders (All Files, Starred, Trash), file count badges per folder, create folder dialog, settings gear icon.
+- Upload progress section in sidebar: shows active `UploadTask` items with status icons, file names, custom progress bars. Completed tasks auto-dismiss after 3 seconds; error tasks can be manually dismissed.
+- Right content area: switches between `FileListScreen`, `FileDetailScreen`, `SettingsScreen` based on state.
 
 ### GitHub Actions CI
 **File:** `.github/workflows/build-apk.yml`
@@ -279,8 +288,11 @@ Main layout with:
 ### Known Issues & Future Work
 - **CI Android toolchain finding resolved:** Plugins now require NDK `26.1.10909125`; app config pins this NDK version explicitly in `android/app/build.gradle`.
 - **CI resource linking finding resolved:** Missing launcher icon resource (`@mipmap/ic_launcher`) was added via XML drawable resources under `android/app/src/main/res/`.
-- **PDF preview** depends on writing a temp file to device storage; may need storage permissions on some Android versions.
+- **PDF preview** depends on writing a temp file to device storage; may need storage permissions on some Android versions. PDF dark mode bug was fixed (`nightMode: false` with white background).
 - **IV generation** uses `Random.secure()` from `dart:math` — cryptographically secure on Android.
 - **The `_generateIV` method** does NOT use PointyCastle's `FortunaRandom` — it uses Dart's `Random.secure()` which is backed by the OS CSPRNG, which is simpler and equally secure.
-- **No offline mode** — the app requires internet to reach the Vercel backend.
+- **Offline mode implemented** — vault data is cached locally via `shared_preferences` after first unlock. App works without network on subsequent opens; syncs from server in background when connectivity is available.
+- **Non-blocking uploads** — upload progress is displayed in the sidebar with per-task status indicators. The rest of the app remains usable during uploads.
+- **Settings page** — batch file upload, sync vault, clear cache, lock vault, and about section with encryption info.
+- **File detail redesign** — hero card with file type icon (color-coded by MIME type), quick action buttons, frosted-glass sections, sticky save bar.
 - **No biometric lock** — could be added as a future enhancement.
