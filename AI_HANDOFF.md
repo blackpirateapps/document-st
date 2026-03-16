@@ -69,6 +69,7 @@ Both clients implement identical encryption: same AES-GCM 256-bit, same PBKDF2 k
 
 ### Core Features
 - **Upload & Decrypt:** Full E2EE flow — files encrypted locally before upload, decrypted locally on download.
+- **Global Drag-and-Drop Upload:** Users can drag files anywhere in the app window to upload. Dropped files are encrypted locally and uploaded to the currently selected folder.
 - **Custom Folders:** Users can create custom virtual folders. Folder names are encrypted.
 - **Subfolders:** Folders support a `parentId` field for nested hierarchy. The sidebar renders a recursive tree with expand/collapse chevrons and per-folder "add subfolder" buttons.
 - **Move & Rename:** Achieved by updating the local metadata JSON, re-encrypting it, and using a `PUT` request to update the database record. The underlying secure blob remains untouched.
@@ -107,6 +108,12 @@ Full Apple/Cupertino dark mode aesthetic:
 
 ### Design Tokens
 All design tokens are defined in `src/index.css` `:root`. Components reference CSS custom properties — never hardcode colors or sizes.
+
+### Responsive Behavior
+- On mobile widths, the sidebar becomes a slide-in drawer with a menu button and backdrop dismiss.
+- The file list collapses secondary columns (size/date) to keep touch targets large and legible.
+- The detail page uses grouped cards and a sticky bottom save bar on mobile.
+- Shared modals adapt to bottom-sheet spacing on narrow screens.
 
 ### Shared Modal Stylesheet
 `UploadModal.module.css` is the **shared modal stylesheet** — imported by ActionModal, FolderModal, and PdfPreviewModal. All modal-related styles (overlay, modal container, header, close button, form controls) live here.
@@ -201,7 +208,7 @@ mobile/
 │   ├── gradle/wrapper/
 │   │   └── gradle-wrapper.properties  # Gradle 8.9
 │   └── app/
-│       ├── build.gradle            # App-level (compileSdk 35, minSdk 24)
+│       ├── build.gradle            # App-level (compileSdk 35, targetSdk 35, minSdk 24, NDK 26.1.10909125)
 │       └── src/main/
 │           ├── AndroidManifest.xml  # INTERNET permission, network security config
 │           ├── kotlin/.../MainActivity.kt  # FlutterActivity entry point
@@ -270,7 +277,8 @@ Main layout with:
 - **Note:** `flutter analyze` and `flutter test` have `continue-on-error: true` to not block APK builds during initial development.
 
 ### Known Issues & Future Work
-- **First CI build finding resolved:** `flutter_pdfview` and `flutter_plugin_android_lifecycle` now require Android SDK 35 and newer AGP. Project was upgraded to compileSdk/targetSdk 35, AGP 8.6.1, Kotlin 1.9.24, and Gradle 8.9.
+- **CI Android toolchain finding resolved:** Plugins now require NDK `26.1.10909125`; app config pins this NDK version explicitly in `android/app/build.gradle`.
+- **CI resource linking finding resolved:** Missing launcher icon resource (`@mipmap/ic_launcher`) was added via XML drawable resources under `android/app/src/main/res/`.
 - **PDF preview** depends on writing a temp file to device storage; may need storage permissions on some Android versions.
 - **IV generation** uses `Random.secure()` from `dart:math` — cryptographically secure on Android.
 - **The `_generateIV` method** does NOT use PointyCastle's `FortunaRandom` — it uses Dart's `Random.secure()` which is backed by the OS CSPRNG, which is simpler and equally secure.

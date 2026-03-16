@@ -3,88 +3,82 @@ import { X, UploadCloud } from 'lucide-react';
 import styles from './UploadModal.module.css';
 import { encryptFile, encryptMetadata, generateUUID } from '../utils/crypto';
 
-export default function UploadModal({ isOpen, onClose, vaultContext, currentFolder, onUploadSuccess }) {
+export default function UploadModal({ isOpen, onClose, vaultContext, currentFolder, onUploadSuccess, onUploadFiles }) {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef(null);
 
   if (!isOpen) return null;
 
   const handleFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+    const selectedFiles = Array.from(e.target.files || []);
+    if (!selectedFiles.length) return;
 
     setIsUploading(true);
-
     try {
-      // 1. Encrypt File Blob Locally
-      const { encryptedBlob, iv, originalName, originalType, size } = await encryptFile(file, vaultContext.aesKey);
+      if (onUploadFiles) {
+        await onUploadFiles(selectedFiles, currentFolder);
+      } else {
+        const file = selectedFiles[0];
+        const { encryptedBlob, iv, originalName, originalType, size } = await encryptFile(file, vaultContext.aesKey);
+        const formData = new FormData();
+        formData.append('file', encryptedBlob, 'encrypted_blob');
 
-      // 2. Upload Encrypted Blob to Vercel/Cloudinary
-      const formData = new FormData();
-      formData.append('file', encryptedBlob, 'encrypted_blob'); // Original name is hidden
+        const uploadRes = await fetch('/api/upload', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${vaultContext.authPassword}`
+          },
+          body: formData
+        });
 
-      const uploadRes = await fetch('/api/upload', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${vaultContext.authPassword}`
-        },
-        body: formData
-      });
+        if (!uploadRes.ok) throw new Error('Failed to upload file to storage');
+        const { url: cloudinary_url } = await uploadRes.json();
 
-      if (!uploadRes.ok) throw new Error('Failed to upload file to storage');
-      const { url: cloudinary_url } = await uploadRes.json();
+        const blobId = generateUUID();
+        const metadataToEncrypt = {
+          originalName,
+          originalType,
+          size,
+          folderId: currentFolder,
+          fileIv: Array.from(iv),
+          starred: false,
+          description: '',
+          properties: [],
+          dateAdded: new Date().toISOString()
+        };
 
-      // 3. Generate UUID for DB Record
-      const blobId = generateUUID();
+        const encryptedMeta = await encryptMetadata(metadataToEncrypt, vaultContext.aesKey);
+        const dbRes = await fetch('/api/files', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${vaultContext.authPassword}`
+          },
+          body: JSON.stringify({
+            id: blobId,
+            encrypted_metadata: encryptedMeta.data,
+            metadata_iv: JSON.stringify(encryptedMeta.iv),
+            cloudinary_url
+          })
+        });
 
-      // 4. Encrypt Metadata (including the IV needed to decrypt the blob)
-      const metadataToEncrypt = {
-        originalName,
-        originalType,
-        size,
-        folderId: currentFolder,
-        fileIv: Array.from(iv), // Store the file's IV in encrypted metadata
-        starred: false,
-        description: '',
-        properties: [],
-        dateAdded: new Date().toISOString()
-      };
-      
-      const encryptedMeta = await encryptMetadata(metadataToEncrypt, vaultContext.aesKey);
+        if (!dbRes.ok) throw new Error('Failed to save metadata to database');
 
-      // 5. Save to Turso DB
-      const dbRes = await fetch('/api/files', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${vaultContext.authPassword}`
-        },
-        body: JSON.stringify({
+        onUploadSuccess({
           id: blobId,
-          encrypted_metadata: encryptedMeta.data,
-          metadata_iv: JSON.stringify(encryptedMeta.iv),
-          cloudinary_url
-        })
-      });
+          cloudinary_url,
+          originalName,
+          originalType,
+          size,
+          folderId: currentFolder,
+          fileIv: Array.from(iv),
+          starred: false,
+          description: '',
+          properties: [],
+          dateAdded: metadataToEncrypt.dateAdded
+        });
+      }
 
-      if (!dbRes.ok) throw new Error('Failed to save metadata to database');
-
-      // 6. Update local state
-      const newFileRecord = {
-        id: blobId,
-        cloudinary_url,
-        originalName,
-        originalType,
-        size,
-        folderId: currentFolder,
-        fileIv: Array.from(iv),
-        starred: false,
-        description: '',
-        properties: [],
-        dateAdded: metadataToEncrypt.dateAdded
-      };
-
-      onUploadSuccess(newFileRecord);
       onClose();
     } catch (err) {
       console.error('Upload failed:', err);
@@ -113,6 +107,7 @@ export default function UploadModal({ isOpen, onClose, vaultContext, currentFold
             className={styles.hiddenInput}
             id="file-upload"
             disabled={isUploading}
+            multiple
           />
           <label htmlFor="file-upload" className={styles.uploadArea}>
             <div className={styles.uploadIconContainer}>

@@ -142,7 +142,8 @@ export default function FileDetailView({ file, vaultContext, customFolders, onFi
       {/* Body */}
       <div className={styles.body}>
         {/* File Header */}
-        <div className={styles.fileHeader}>
+        <div className={styles.heroCard}>
+          <div className={styles.fileHeader}>
           <div className={styles.fileIconBox}>
             <FileIcon size={28} />
           </div>
@@ -151,6 +152,19 @@ export default function FileDetailView({ file, vaultContext, customFolders, onFi
             <div className={styles.fileHeaderMeta}>
               {formatSize(file.size)} &middot; {file.originalType || 'Unknown type'}
             </div>
+          </div>
+          </div>
+
+          <div className={styles.heroMetaRow}>
+            <span className={styles.folderBadge}>
+              <Folder size={11} />
+              {folderName}
+            </span>
+            <span className={styles.heroMetaDot} />
+            <span className={styles.heroDate}>
+              <Clock size={12} />
+              {new Date(file.dateAdded).toLocaleDateString()}
+            </span>
           </div>
         </div>
 
@@ -163,7 +177,7 @@ export default function FileDetailView({ file, vaultContext, customFolders, onFi
         )}
 
         {/* Description */}
-        <div className={styles.section}>
+        <div className={`${styles.section} ${styles.sectionCard}`}>
           <label className={styles.sectionLabel}>Description</label>
           <textarea
             className={styles.descriptionTextarea}
@@ -175,7 +189,7 @@ export default function FileDetailView({ file, vaultContext, customFolders, onFi
         </div>
 
         {/* Custom Properties */}
-        <div className={styles.section}>
+        <div className={`${styles.section} ${styles.sectionCard}`}>
           <label className={styles.sectionLabel}>Properties</label>
           <div className={styles.propertiesList}>
             {properties.map((prop, index) => (
@@ -211,7 +225,7 @@ export default function FileDetailView({ file, vaultContext, customFolders, onFi
         </div>
 
         {/* File Metadata */}
-        <div className={styles.section}>
+        <div className={`${styles.section} ${styles.sectionCard}`}>
           <label className={styles.sectionLabel}>File Info</label>
           <div className={styles.metadataTable}>
             <div className={styles.metadataRow}>
@@ -229,7 +243,7 @@ export default function FileDetailView({ file, vaultContext, customFolders, onFi
             <div className={styles.metadataRow}>
               <span className={styles.metadataKey}>Folder</span>
               <span className={styles.metadataValue}>
-                <span className={styles.folderBadge}>
+                <span className={styles.folderBadgeCompact}>
                   <Folder size={11} />
                   {folderName}
                 </span>
@@ -254,13 +268,15 @@ export default function FileDetailView({ file, vaultContext, customFolders, onFi
         </div>
 
         {/* Save Button */}
-        <button
-          className={styles.saveBtn}
-          onClick={handleSave}
-          disabled={isSaving || !hasChanges}
-        >
-          {isSaving ? 'Saving...' : 'Save Changes'}
-        </button>
+        <div className={styles.saveBar}>
+          <button
+            className={styles.saveBtn}
+            onClick={handleSave}
+            disabled={isSaving || !hasChanges}
+          >
+            {isSaving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
       </div>
 
       {/* PDF Preview Modal */}

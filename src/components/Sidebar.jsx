@@ -1,4 +1,4 @@
-import { Folder, ChevronRight, Inbox, Star, Settings, Trash2, Plus } from 'lucide-react';
+import { Folder, ChevronRight, Inbox, Star, Settings, Trash2, Plus, X } from 'lucide-react';
 import styles from './Sidebar.module.css';
 import clsx from 'clsx';
 import { useState } from 'react';
@@ -57,7 +57,7 @@ function FolderTreeItem({ folder, currentFolder, onSelectFolder, customFolders, 
   );
 }
 
-export default function Sidebar({ currentFolder, onSelectFolder, customFolders = [], vaultContext, onFolderCreateSuccess }) {
+export default function Sidebar({ currentFolder, onSelectFolder, customFolders = [], vaultContext, onFolderCreateSuccess, isMobileOpen = false, onCloseMobile }) {
   const [folderModalState, setFolderModalState] = useState({ isOpen: false, parentId: null });
 
   const defaultFolders = [
@@ -76,9 +76,12 @@ export default function Sidebar({ currentFolder, onSelectFolder, customFolders =
   };
 
   return (
-    <aside className={styles.sidebar}>
+    <aside className={`${styles.sidebar} ${isMobileOpen ? styles.mobileOpen : ''}`}>
       <div className={styles.header}>
         <h2 className={styles.title}>Vault</h2>
+        <button className={styles.mobileCloseBtn} onClick={onCloseMobile} aria-label="Close folders">
+          <X size={18} />
+        </button>
       </div>
 
       <nav className={styles.nav}>
