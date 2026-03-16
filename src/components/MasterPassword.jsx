@@ -24,7 +24,14 @@ export default function MasterPassword({ onUnlock }) {
       });
 
       if (!res.ok) {
-        throw new Error('Invalid master password.');
+        if (res.status === 404) {
+          throw new Error('API not found (Are you using "vercel dev" instead of "npm run dev"?)');
+        } else if (res.status === 401) {
+          throw new Error('Invalid master password.');
+        } else {
+          const errorData = await res.json().catch(() => ({}));
+          throw new Error(`Server error (${res.status}): ${errorData.error || 'Unknown error'}`);
+        }
       }
 
       // 2. Derive AES key (using a consistent salt for the prototype. In production, 
