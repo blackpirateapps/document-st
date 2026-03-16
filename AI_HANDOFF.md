@@ -195,13 +195,13 @@ mobile/
 ├── test/
 │   └── widget_test.dart            # Placeholder test
 ├── android/
-│   ├── build.gradle                # Root Gradle config (AGP 8.1.4, Kotlin 1.9.22)
+│   ├── build.gradle                # Root Gradle config (AGP 8.6.1, Kotlin 1.9.24)
 │   ├── settings.gradle             # Flutter Gradle plugin loader
 │   ├── gradle.properties           # Gradle JVM args
 │   ├── gradle/wrapper/
-│   │   └── gradle-wrapper.properties  # Gradle 8.3
+│   │   └── gradle-wrapper.properties  # Gradle 8.9
 │   └── app/
-│       ├── build.gradle            # App-level (compileSdk 34, minSdk 24)
+│       ├── build.gradle            # App-level (compileSdk 35, minSdk 24)
 │       └── src/main/
 │           ├── AndroidManifest.xml  # INTERNET permission, network security config
 │           ├── kotlin/.../MainActivity.kt  # FlutterActivity entry point
@@ -270,7 +270,7 @@ Main layout with:
 - **Note:** `flutter analyze` and `flutter test` have `continue-on-error: true` to not block APK builds during initial development.
 
 ### Known Issues & Future Work
-- **First CI build** may reveal compilation errors since the code hasn't been tested with a real Flutter SDK yet. Expect iterative fixes.
+- **First CI build finding resolved:** `flutter_pdfview` and `flutter_plugin_android_lifecycle` now require Android SDK 35 and newer AGP. Project was upgraded to compileSdk/targetSdk 35, AGP 8.6.1, Kotlin 1.9.24, and Gradle 8.9.
 - **PDF preview** depends on writing a temp file to device storage; may need storage permissions on some Android versions.
 - **IV generation** uses `Random.secure()` from `dart:math` — cryptographically secure on Android.
 - **The `_generateIV` method** does NOT use PointyCastle's `FortunaRandom` — it uses Dart's `Random.secure()` which is backed by the OS CSPRNG, which is simpler and equally secure.
