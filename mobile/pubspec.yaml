@@ -1,0 +1,31 @@
+name: document_st
+description: Zero-Knowledge E2EE Document Vault - Mobile App
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.1.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+  http: ^1.2.0
+  provider: ^6.1.1
+  pointycastle: ^3.9.1
+  file_picker: ^8.0.0+1
+  path_provider: ^2.1.2
+  open_file: ^3.3.2
+  flutter_pdfview: ^1.3.2
+  mime: ^1.0.5
+  uuid: ^4.3.3
+  intl: ^0.19.0
+  http_parser: ^4.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.1
+
+flutter:
+  uses-material-design: true

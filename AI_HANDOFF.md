@@ -1,22 +1,29 @@
 # E2EE Document Vault - AI Handoff & Architecture Guide
 
 ## Overview
-This is a personal, Zero-Knowledge End-to-End Encrypted (E2EE) Document Vault. It is built to ensure that the server, database, and storage providers never have access to unencrypted files or metadata. 
+This is a personal, Zero-Knowledge End-to-End Encrypted (E2EE) Document Vault with two clients:
+1. **Web App** (React/Vite) — Fully complete, deployed on Vercel.
+2. **Flutter Mobile App** (Android) — Cupertino-themed, shares the same backend and encrypted vault data. Built via GitHub Actions CI.
+
+Both clients implement identical encryption: same AES-GCM 256-bit, same PBKDF2 key derivation, same static salt. A file encrypted by one client can be decrypted by the other.
 
 ## Core Architecture
-- **Frontend Framework:** React built with Vite.
-- **Styling:** Vanilla CSS Modules with a strict, Cupertino-inspired (Apple HIG) dark mode aesthetic — frosted glass, vibrancy, spring animations, SF Pro typography scale.
-- **Backend/API:** Vercel Serverless Functions (`/api`).
+- **Web Frontend:** React built with Vite.
+- **Mobile Frontend:** Flutter (Dart) with Cupertino widgets — NO Material design.
+- **Styling (Web):** Vanilla CSS Modules with a strict, Cupertino-inspired (Apple HIG) dark mode aesthetic — frosted glass, vibrancy, spring animations, SF Pro typography scale.
+- **Styling (Mobile):** Flutter Cupertino widgets with custom dark theme matching web design tokens.
+- **Backend/API:** Vercel Serverless Functions (`/api`). Base URL: `https://document-st.vercel.app`
 - **Database:** Turso DB (LibSQL) for storing encrypted metadata. Uses `files` and `folders` tables.
 - **Object Storage:** Cloudinary for storing encrypted file blobs.
-- **Cryptography:** Native Browser Web Crypto API (AES-GCM 256-bit, PBKDF2).
-- **Icons:** `lucide-react` (standardized — do not add other icon packages).
-- **Utilities:** `clsx` for conditional class names.
+- **Cryptography (Web):** Native Browser Web Crypto API (AES-GCM 256-bit, PBKDF2).
+- **Cryptography (Mobile):** PointyCastle library (AES-GCM 256-bit, PBKDF2) — output-compatible with Web Crypto.
+- **Icons (Web):** `lucide-react` (standardized — do not add other icon packages).
+- **Utilities (Web):** `clsx` for conditional class names.
 
 ## Security & Encryption Flow (Zero-Knowledge)
-1. **Master Password:** The user enters a master password on the frontend.
-2. **Authentication:** The frontend sends the raw password as a Bearer token to `/api/files` and `/api/folders` to authenticate.
-3. **Key Derivation:** Locally, the frontend derives a 256-bit AES-GCM key from the master password using PBKDF2 and a static salt.
+1. **Master Password:** The user enters a master password on the client (web or mobile).
+2. **Authentication:** The client sends the raw password as a Bearer token to `/api/files` and `/api/folders` to authenticate.
+3. **Key Derivation:** Locally, the client derives a 256-bit AES-GCM key from the master password using PBKDF2 (100,000 iterations, SHA-256) with a **static salt**: `[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]`. **CRITICAL:** Both clients must use this exact salt or derived keys will differ and cross-client decryption will fail.
 4. **File Encryption (Upload):**
    - The selected `File` object is converted to an `ArrayBuffer` and encrypted locally via `crypto.subtle.encrypt` (AES-GCM).
    - The *encrypted blob* is sent to the Vercel API (`/api/upload`) and stored directly in Cloudinary. Cloudinary only sees random bytes.
@@ -157,3 +164,115 @@ The app has no client-side router. Navigation is state-driven:
 - **Metadata Evolution:** When adding new fields to the encrypted metadata JSON, always provide fallback defaults during decryption to maintain backward compatibility with existing records.
 - **Shared Modal Styles:** All modals import from `UploadModal.module.css`. Add new modal styles there, not in separate files.
 - **Folder API Gap:** `api/folders.js` has no PUT endpoint. If folder renaming or editing is needed, that endpoint must be added first.
+
+---
+
+## Flutter Mobile App (Android)
+
+### Status
+The mobile app code is **written but not yet tested/built**. It must be built in GitHub Actions CI because the developer's machine cannot build Android apps locally. The GitHub Actions workflow (`.github/workflows/build-apk.yml`) triggers on pushes to `main` that modify files under `mobile/`.
+
+### Design Constraints
+- **Cupertino ONLY:** Uses `CupertinoApp`, `CupertinoPageScaffold`, `CupertinoNavigationBar`, `CupertinoTextField`, `CupertinoActionSheet`, etc. NO Material widgets (`MaterialApp`, `Scaffold`, `AppBar`, `TextField`, etc.) are allowed. The goal is to match the web app's Apple HIG dark aesthetic on Android.
+- **Zero-Knowledge:** All encryption/decryption happens on-device. Never send unencrypted data to the backend.
+- **Crypto Compatibility:** The Flutter `CryptoService` must produce output byte-for-byte compatible with the web `crypto.js`. Same AES-GCM 256-bit, same PBKDF2 (100k iterations, SHA-256), same static salt `[1..16]`, same 12-byte IV, same 128-bit auth tag.
+
+### Tech Stack
+- **Framework:** Flutter 3.24+ (Dart)
+- **State Management:** Provider (`ChangeNotifierProvider` + `VaultProvider`)
+- **HTTP:** `http` package
+- **Crypto:** `pointycastle` (AES-GCM, PBKDF2)
+- **PDF Viewer:** `flutter_pdfview`
+- **File Picker:** `file_picker`
+- **UUIDs:** `uuid`
+- **Path Utilities:** `path`
+
+### Project Structure
+```
+mobile/
+├── pubspec.yaml                    # Dependencies & app config
+├── analysis_options.yaml           # Dart lint rules
+├── test/
+│   └── widget_test.dart            # Placeholder test
+├── android/
+│   ├── build.gradle                # Root Gradle config (AGP 8.1.4, Kotlin 1.9.22)
+│   ├── settings.gradle             # Flutter Gradle plugin loader
+│   ├── gradle.properties           # Gradle JVM args
+│   ├── gradle/wrapper/
+│   │   └── gradle-wrapper.properties  # Gradle 8.3
+│   └── app/
+│       ├── build.gradle            # App-level (compileSdk 34, minSdk 24)
+│       └── src/main/
+│           ├── AndroidManifest.xml  # INTERNET permission, network security config
+│           ├── kotlin/.../MainActivity.kt  # FlutterActivity entry point
+│           └── res/                 # Launch icons, styles, network config
+└── lib/
+    ├── main.dart                   # App entry: CupertinoApp + Provider + auth gating
+    ├── theme/
+    │   └── app_theme.dart          # Dark Cupertino theme tokens matching web CSS vars
+    ├── models/
+    │   ├── vault_file.dart         # VaultFile data model (fromDecryptedMeta, toMetadataJson)
+    │   └── vault_folder.dart       # VaultFolder data model
+    ├── services/
+    │   ├── crypto_service.dart     # AES-GCM + PBKDF2 (PointyCastle). CRITICAL FILE.
+    │   ├── api_service.dart        # HTTP client for all Vercel API endpoints
+    │   └── vault_provider.dart     # ChangeNotifier: unlock, fetch, decrypt, CRUD, star, move
+    └── screens/
+        ├── unlock_screen.dart      # Master password input
+        ├── home_screen.dart        # Main layout: sidebar + content area
+        ├── file_list_screen.dart   # File list with star, upload, actions, PDF click-to-preview
+        ├── file_detail_screen.dart # Detail view: description, properties, metadata, save
+        └── pdf_preview_screen.dart # Decrypt-and-view PDF via flutter_pdfview
+```
+
+### Key Mobile Files
+
+#### `lib/services/crypto_service.dart` (CRITICAL)
+Mirrors `src/utils/crypto.js` exactly:
+- `deriveKeyBytes(password)` — PBKDF2-SHA256, 100k iterations, static salt `[1..16]`, produces 32-byte key.
+- `encryptFileBytes(plain, key)` — AES-GCM encrypt with random 12-byte IV, 128-bit auth tag. Returns `{encryptedBytes, iv}`.
+- `decryptFileBytes(encrypted, key, ivList)` — AES-GCM decrypt.
+- `encryptMetadata(metadata, key)` — JSON encode -> encrypt -> base64. Returns `{data, iv}`.
+- `decryptMetadata(encryptedBase64, ivList, key)` — base64 decode -> decrypt -> JSON parse.
+
+**Any changes to this file must maintain byte-level compatibility with the web app's crypto.js, or cross-client decryption will break.**
+
+#### `lib/services/api_service.dart`
+HTTP client targeting `https://document-st.vercel.app`:
+- `authenticate(password)` — `GET /api/files` with Bearer token.
+- `fetchFiles(password)` — `GET /api/files` returns all encrypted file records.
+- `fetchFolders(password)` — `GET /api/folders` returns all encrypted folder records.
+- `createFile(...)` — `POST /api/files` with encrypted metadata + Cloudinary URL.
+- `updateFile(...)` — `PUT /api/files` with updated encrypted metadata.
+- `deleteFile(...)` — `DELETE /api/files`.
+- `createFolder(...)` — `POST /api/folders`.
+- `deleteFolder(...)` — `DELETE /api/folders`.
+- `uploadEncryptedFile(...)` — Multipart `POST /api/upload` with encrypted bytes.
+- `fetchRawFile(url)` — `GET` the encrypted blob from Cloudinary.
+
+#### `lib/services/vault_provider.dart`
+ChangeNotifier that manages all app state:
+- Holds `_keyBytes`, `_password`, `_files`, `_folders`, `_currentFolderId`, `_selectedFile`.
+- `unlock(password)` — authenticates, derives key, fetches & decrypts all data.
+- CRUD operations: `uploadFile`, `renameFile`, `moveFile`, `copyFile`, `trashFile`, `toggleStar`, `createFolder`, `deleteFolder`.
+- All mutations re-encrypt metadata and PUT/POST to the API.
+
+#### `lib/screens/home_screen.dart`
+Main layout with:
+- Left sidebar: folder tree (recursive with expand/collapse), default folders (All Files, Starred, Trash), create folder dialog.
+- Right content area: switches between `FileListScreen`, `FileDetailScreen` based on `selectedFile` state.
+
+### GitHub Actions CI
+**File:** `.github/workflows/build-apk.yml`
+- **Triggers:** Push to `main` (paths: `mobile/**`), PRs to `main`, manual `workflow_dispatch`.
+- **Steps:** Checkout -> Java 17 (Temurin) -> Flutter 3.24 (stable, cached) -> `flutter pub get` -> `flutter analyze` -> `flutter test` -> `flutter build apk --release` -> Upload artifact.
+- **Artifact:** `document-vault-release-apk` (APK retained for 30 days).
+- **Note:** `flutter analyze` and `flutter test` have `continue-on-error: true` to not block APK builds during initial development.
+
+### Known Issues & Future Work
+- **First CI build** may reveal compilation errors since the code hasn't been tested with a real Flutter SDK yet. Expect iterative fixes.
+- **PDF preview** depends on writing a temp file to device storage; may need storage permissions on some Android versions.
+- **IV generation** uses `Random.secure()` from `dart:math` — cryptographically secure on Android.
+- **The `_generateIV` method** does NOT use PointyCastle's `FortunaRandom` — it uses Dart's `Random.secure()` which is backed by the OS CSPRNG, which is simpler and equally secure.
+- **No offline mode** — the app requires internet to reach the Vercel backend.
+- **No biometric lock** — could be added as a future enhancement.
