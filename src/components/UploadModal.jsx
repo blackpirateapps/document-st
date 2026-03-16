@@ -44,6 +44,9 @@ export default function UploadModal({ isOpen, onClose, vaultContext, currentFold
         size,
         folderId: currentFolder,
         fileIv: Array.from(iv), // Store the file's IV in encrypted metadata
+        starred: false,
+        description: '',
+        properties: [],
         dateAdded: new Date().toISOString()
       };
       
@@ -75,6 +78,9 @@ export default function UploadModal({ isOpen, onClose, vaultContext, currentFold
         size,
         folderId: currentFolder,
         fileIv: Array.from(iv),
+        starred: false,
+        description: '',
+        properties: [],
         dateAdded: metadataToEncrypt.dateAdded
       };
 

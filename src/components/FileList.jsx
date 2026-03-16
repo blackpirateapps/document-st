@@ -1,11 +1,11 @@
-import { FileIcon, Download, Clock, MoreVertical, Edit2, Copy, FolderInput, Trash2, Eye } from 'lucide-react';
+import { FileIcon, Download, Clock, MoreVertical, Edit2, Copy, FolderInput, Trash2, Eye, Star } from 'lucide-react';
 import styles from './FileList.module.css';
 import { decryptFile, encryptMetadata, generateUUID } from '../utils/crypto';
 import { useState, useRef, useEffect } from 'react';
 import ActionModal from './ActionModal';
 import PdfPreviewModal from './PdfPreviewModal';
 
-export default function FileList({ files, aesKey, currentFolder, vaultContext, customFolders, onFileUpdate, onFileCopy }) {
+export default function FileList({ files, aesKey, currentFolder, vaultContext, customFolders, onFileUpdate, onFileCopy, onSelectFile }) {
   const [downloadingId, setDownloadingId] = useState(null);
   const [menuOpenId, setMenuOpenId] = useState(null);
   
@@ -58,17 +58,74 @@ export default function FileList({ files, aesKey, currentFolder, vaultContext, c
     }
   };
 
+  const handleToggleStar = async (file) => {
+    try {
+      const newMetadata = { ...file, starred: !file.starred };
+      // Remove non-metadata fields before encrypting
+      const metaToEncrypt = {
+        originalName: newMetadata.originalName,
+        originalType: newMetadata.originalType,
+        size: newMetadata.size,
+        folderId: newMetadata.folderId,
+        fileIv: newMetadata.fileIv,
+        starred: newMetadata.starred,
+        description: newMetadata.description || '',
+        properties: newMetadata.properties || [],
+        dateAdded: newMetadata.dateAdded
+      };
+      const encryptedMeta = await encryptMetadata(metaToEncrypt, vaultContext.aesKey);
+      const dbRes = await fetch('/api/files', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${vaultContext.authPassword}`
+        },
+        body: JSON.stringify({
+          id: file.id,
+          encrypted_metadata: encryptedMeta.data,
+          metadata_iv: JSON.stringify(encryptedMeta.iv)
+        })
+      });
+      if (!dbRes.ok) throw new Error('Failed to update star status');
+      onFileUpdate({ ...file, starred: !file.starred });
+    } catch (_e) {
+      alert("Failed to update star status.");
+    }
+  };
+
+  const handleRowClick = (file) => {
+    // PDF files open the preview modal directly
+    if (file.originalType === 'application/pdf') {
+      setPreviewModalConfig({ isOpen: true, file });
+    } else {
+      // All other files open the detail view
+      onSelectFile(file);
+    }
+  };
+
   const handleAction = async (action, file) => {
     setMenuOpenId(null);
 
     if (action === 'preview') {
       setPreviewModalConfig({ isOpen: true, file });
+    } else if (action === 'details') {
+      onSelectFile(file);
     } else if (action === 'rename' || action === 'move') {
       setActionModalConfig({ isOpen: true, type: action, file });
     } else if (action === 'trash') {
       if (!window.confirm(`Move "${file.originalName}" to trash?`)) return;
       try {
-        const newMetadata = { ...file, folderId: 'trash' };
+        const newMetadata = {
+          originalName: file.originalName,
+          originalType: file.originalType,
+          size: file.size,
+          folderId: 'trash',
+          fileIv: file.fileIv,
+          starred: file.starred || false,
+          description: file.description || '',
+          properties: file.properties || [],
+          dateAdded: file.dateAdded
+        };
         const encryptedMeta = await encryptMetadata(newMetadata, vaultContext.aesKey);
         const dbRes = await fetch('/api/files', {
           method: 'PUT',
@@ -83,17 +140,22 @@ export default function FileList({ files, aesKey, currentFolder, vaultContext, c
           })
         });
         if (!dbRes.ok) throw new Error('Failed to update file metadata');
-        onFileUpdate(newMetadata);
-      } catch (e) {
+        onFileUpdate({ ...file, folderId: 'trash' });
+      } catch (_e) {
         alert("Failed to trash file.");
       }
     } else if (action === 'copy') {
       try {
         const newId = generateUUID();
         const newMetadata = {
-          ...file,
-          id: newId,
-          originalName: file.originalName.replace(/(\.[\w\d_-]+)$/i, ' Copy$1'), // append " Copy" before extension
+          originalName: file.originalName.replace(/(\.[\w\d_-]+)$/i, ' Copy$1'),
+          originalType: file.originalType,
+          size: file.size,
+          folderId: file.folderId,
+          fileIv: file.fileIv,
+          starred: false,
+          description: file.description || '',
+          properties: file.properties || [],
           dateAdded: new Date().toISOString()
         };
         const encryptedMeta = await encryptMetadata(newMetadata, vaultContext.aesKey);
@@ -108,18 +170,25 @@ export default function FileList({ files, aesKey, currentFolder, vaultContext, c
             id: newId,
             encrypted_metadata: encryptedMeta.data,
             metadata_iv: JSON.stringify(encryptedMeta.iv),
-            cloudinary_url: file.cloudinary_url // Same secure blob!
+            cloudinary_url: file.cloudinary_url
           })
         });
         if (!dbRes.ok) throw new Error('Failed to save copied file metadata');
-        onFileCopy(newMetadata);
-      } catch (e) {
+        onFileCopy({
+          id: newId,
+          cloudinary_url: file.cloudinary_url,
+          ...newMetadata
+        });
+      } catch (_e) {
         alert("Failed to copy file.");
       }
     }
   };
 
-  const folderFiles = files.filter(f => f.folderId === currentFolder);
+  // Filter files: "starred" folder shows all starred files, otherwise filter by folderId
+  const folderFiles = currentFolder === 'starred'
+    ? files.filter(f => f.starred && f.folderId !== 'trash')
+    : files.filter(f => f.folderId === currentFolder);
   
   // Find custom folder name if it's a custom folder
   let folderTitle = currentFolder.charAt(0).toUpperCase() + currentFolder.slice(1);
@@ -137,13 +206,16 @@ export default function FileList({ files, aesKey, currentFolder, vaultContext, c
           <div className={styles.emptyIcon}>
             <FolderEmptyIcon />
           </div>
-          <p className={styles.emptyText}>No files in this folder.</p>
+          <p className={styles.emptyText}>
+            {currentFolder === 'starred' ? 'No starred files.' : 'No files in this folder.'}
+          </p>
         </div>
       ) : (
         <div className={styles.tableContainer}>
           <table className={styles.table}>
             <thead>
               <tr>
+                <th className={styles.starCol}></th>
                 <th>Name</th>
                 <th>Size</th>
                 <th>Date Added</th>
@@ -152,7 +224,16 @@ export default function FileList({ files, aesKey, currentFolder, vaultContext, c
             </thead>
             <tbody>
               {folderFiles.map(file => (
-                <tr key={file.id} className={styles.row}>
+                <tr key={file.id} className={styles.row} onClick={() => handleRowClick(file)}>
+                  <td className={styles.starCol} onClick={(e) => e.stopPropagation()}>
+                    <button
+                      className={`${styles.starBtn} ${file.starred ? styles.starActive : ''}`}
+                      onClick={() => handleToggleStar(file)}
+                      title={file.starred ? 'Unstar' : 'Star'}
+                    >
+                      <Star size={14} fill={file.starred ? 'currentColor' : 'none'} />
+                    </button>
+                  </td>
                   <td>
                     <div className={styles.fileName}>
                       <FileIcon size={18} className={styles.icon} />
@@ -168,7 +249,7 @@ export default function FileList({ files, aesKey, currentFolder, vaultContext, c
                       {new Date(file.dateAdded).toLocaleDateString()}
                     </div>
                   </td>
-                  <td className={styles.actions}>
+                  <td className={styles.actions} onClick={(e) => e.stopPropagation()}>
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', position: 'relative' }}>
                       <button 
                         className={styles.downloadBtn} 
@@ -197,6 +278,9 @@ export default function FileList({ files, aesKey, currentFolder, vaultContext, c
                               <Eye size={14} /> Preview
                             </button>
                           )}
+                          <button onClick={() => handleAction('details', file)}>
+                            <FileIcon size={14} /> Details
+                          </button>
                           <button onClick={() => handleAction('rename', file)}>
                             <Edit2 size={14} /> Rename
                           </button>

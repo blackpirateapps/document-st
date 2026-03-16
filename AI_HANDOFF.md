@@ -5,11 +5,13 @@ This is a personal, Zero-Knowledge End-to-End Encrypted (E2EE) Document Vault. I
 
 ## Core Architecture
 - **Frontend Framework:** React built with Vite.
-- **Styling:** Vanilla CSS Modules with a strict, Cupertino-inspired (Apple/Things 3) dark mode aesthetic.
+- **Styling:** Vanilla CSS Modules with a strict, Cupertino-inspired (Apple HIG) dark mode aesthetic — frosted glass, vibrancy, spring animations, SF Pro typography scale.
 - **Backend/API:** Vercel Serverless Functions (`/api`).
 - **Database:** Turso DB (LibSQL) for storing encrypted metadata. Uses `files` and `folders` tables.
 - **Object Storage:** Cloudinary for storing encrypted file blobs.
 - **Cryptography:** Native Browser Web Crypto API (AES-GCM 256-bit, PBKDF2).
+- **Icons:** `lucide-react` (standardized — do not add other icon packages).
+- **Utilities:** `clsx` for conditional class names.
 
 ## Security & Encryption Flow (Zero-Knowledge)
 1. **Master Password:** The user enters a master password on the frontend.
@@ -19,30 +21,118 @@ This is a personal, Zero-Knowledge End-to-End Encrypted (E2EE) Document Vault. I
    - The selected `File` object is converted to an `ArrayBuffer` and encrypted locally via `crypto.subtle.encrypt` (AES-GCM).
    - The *encrypted blob* is sent to the Vercel API (`/api/upload`) and stored directly in Cloudinary. Cloudinary only sees random bytes.
 5. **Metadata & Folder Encryption:**
-   - Sensitive metadata (original filename, file type, file size, folder location, and the IV used to encrypt the blob) is bundled into a JSON object.
+   - Sensitive metadata (original filename, file type, file size, folder location, starred status, description, custom properties, and the IV used to encrypt the blob) is bundled into a JSON object.
    - This JSON object is encrypted locally using the same AES key.
-   - The *encrypted metadata string* (Base64) and the Cloudinary URL are sent to Turso DB (`/api/files`). Folder names are similarly encrypted and sent to `folders` table.
+   - The *encrypted metadata string* (Base64) and the Cloudinary URL are sent to Turso DB (`/api/files`). Folder names and parent IDs are similarly encrypted and sent to `folders` table.
 6. **Decryption (Download/View):**
    - The frontend fetches all encrypted metadata records from Turso.
    - It decrypts the metadata locally using the key in memory to restore the file and folder lists.
    - When a user clicks "Download", the app fetches the encrypted blob from Cloudinary, decrypts it locally using the AES key and the specific IV stored in the decrypted metadata, and triggers a local browser download via `URL.createObjectURL`.
    - **PDF Previews:** For PDFs, the blob is decrypted into memory and fed to an iframe via an Object URL, enabling secure, local previewing.
 
-## Features & File Operations
-- **Upload & Decrypt:** Full E2EE flow.
+## Encrypted Metadata Schema
+
+### File Metadata JSON (encrypted client-side)
+```json
+{
+  "originalName": "document.pdf",
+  "originalType": "application/pdf",
+  "size": 123456,
+  "folderId": "inbox",
+  "fileIv": [1, 2, 3, ...],
+  "starred": false,
+  "description": "",
+  "properties": [{ "key": "Client", "value": "Acme Corp" }],
+  "dateAdded": "2026-01-15T10:30:00.000Z"
+}
+```
+
+### Folder Metadata JSON (encrypted client-side)
+```json
+{
+  "name": "My Folder",
+  "parentId": null,
+  "dateAdded": "2026-01-15T10:30:00.000Z"
+}
+```
+
+**Backward Compatibility:** When decrypting older records that don't have `starred`, `description`, `properties`, or `parentId`, defaults are applied (`false`, `''`, `[]`, `null` respectively). This ensures existing vault data remains accessible after feature additions.
+
+## Features
+
+### Core Features
+- **Upload & Decrypt:** Full E2EE flow — files encrypted locally before upload, decrypted locally on download.
 - **Custom Folders:** Users can create custom virtual folders. Folder names are encrypted.
+- **Subfolders:** Folders support a `parentId` field for nested hierarchy. The sidebar renders a recursive tree with expand/collapse chevrons and per-folder "add subfolder" buttons.
 - **Move & Rename:** Achieved by updating the local metadata JSON, re-encrypting it, and using a `PUT` request to update the database record. The underlying secure blob remains untouched.
 - **Copy:** Achieved by duplicating the metadata (appending " Copy"), encrypting it, and creating a new DB record that points to the exact *same* `cloudinary_url` and uses the same `fileIv`.
 - **Trash:** Moves the file to a virtual `folderId: 'trash'`.
-- **PDF Preview:** Integrated modal for viewing PDF files securely without exposing them to the server.
+
+### Starred Documents
+- Each file has a `starred` boolean in its encrypted metadata.
+- Star toggle is available: per-row in the file list, in the top bar of the detail view, and is persisted by re-encrypting metadata and PUTting to `/api/files`.
+- The "Starred" sidebar folder is a virtual view that filters all starred non-trash files across all folders.
+
+### PDF Preview
+- Clicking a PDF row in the file list opens the PdfPreviewModal directly.
+- The PDF preview modal decrypts the blob in-memory and renders it via iframe Object URL.
+- PDF preview is also accessible from the file detail view via a "Preview PDF" button, and from the context menu.
+
+### File Detail View
+- Clicking a non-PDF file row (or selecting "Details" from context menu) opens a detail page.
+- **Editable description:** Free-text textarea persisted in encrypted metadata.
+- **Custom properties:** Key-value pairs that can be added/removed, stored as `[{ key, value }]` in encrypted metadata.
+- **Star toggle:** In the top bar.
+- **File metadata display:** Read-only table showing name, type, size, folder, date added, and file ID.
+- **Save button:** Re-encrypts all metadata fields and PUTs to `/api/files`. Button is disabled when no changes are detected.
+- All changes maintain zero-knowledge — description, properties, and star status never leave the browser unencrypted.
+
+## UI Design System
+
+### Design Language
+Full Apple/Cupertino dark mode aesthetic:
+- **Vibrancy/Translucency:** Sidebar and modals use `backdrop-filter: blur() saturate()` for frosted glass effects.
+- **Typography:** SF Pro font stack with Apple HIG type scale (caption2 through large-title).
+- **Colors:** iOS/macOS system colors — `--accent-blue: #0A84FF`, `--danger-red: #FF453A`, `--system-orange: #FF9F0A`, etc.
+- **Radius:** Apple-style border radii from 4px to 20px.
+- **Animations:** Spring easing curves (`cubic-bezier(0.22, 1, 0.36, 1)`), scale transforms on press.
+- **Shadows:** Multi-layer shadows with blue glow effects for interactive elements.
+
+### Design Tokens
+All design tokens are defined in `src/index.css` `:root`. Components reference CSS custom properties — never hardcode colors or sizes.
+
+### Shared Modal Stylesheet
+`UploadModal.module.css` is the **shared modal stylesheet** — imported by ActionModal, FolderModal, and PdfPreviewModal. All modal-related styles (overlay, modal container, header, close button, form controls) live here.
 
 ## Key Files & Responsibilities
-- `src/utils/crypto.js`: Contains all Web Crypto API logic (`deriveKey`, `encryptFile`, `decryptFile`, `encryptMetadata`, `decryptMetadata`). *CRITICAL: Any changes to these functions must maintain backward compatibility or all existing vault data will be permanently lost.*
-- `src/components/UploadModal.jsx`: Orchestrates the complex multi-step upload flow (local encryption -> Cloudinary upload -> metadata encryption -> Turso DB save).
-- `src/components/FileList.jsx`: Handles the UI for the virtual folders, the context menu for file operations, and the download/decryption logic.
-- `src/components/ActionModal.jsx` & `FolderModal.jsx`: Manage metadata re-encryption for operations.
-- `api/upload.js`: Vercel Serverless function. Uses `formidable` to parse the encrypted file upload and pushes it to Cloudinary.
-- `api/files.js` & `api/folders.js`: Vercel Serverless functions handling Turso DB CRUD.
+
+### Source Components
+- `src/App.jsx` — Root component. Manages vault state, folder navigation, file/folder decryption, selected file state for detail view. Hides FAB when detail view is open.
+- `src/components/MasterPassword.jsx` — Unlock screen with master password input and key derivation.
+- `src/components/Sidebar.jsx` — Navigation sidebar with default folders, recursive `FolderTreeItem` for custom folder hierarchy, expand/collapse, subfolder creation.
+- `src/components/FileList.jsx` — File table with star toggle, click-to-open (PDF -> preview, others -> detail), context menu (preview, details, rename, move, copy, trash), download.
+- `src/components/FileDetailView.jsx` — Detail page for individual files: editable description, custom key-value properties, star toggle, file metadata, save, download, PDF preview button.
+- `src/components/UploadModal.jsx` — Multi-step upload flow: local encryption -> Cloudinary upload -> metadata encryption -> Turso DB save. Includes default `starred: false`, `description: ''`, `properties: []`.
+- `src/components/ActionModal.jsx` — Rename and move operations. Preserves `starred`, `description`, `properties` fields during re-encryption.
+- `src/components/FolderModal.jsx` — Create folders and subfolders. Accepts `parentId` prop for subfolder creation.
+- `src/components/PdfPreviewModal.jsx` — Secure in-browser PDF viewer via decrypted Object URL in iframe.
+
+### Crypto (CRITICAL)
+- `src/utils/crypto.js` — Contains all Web Crypto API logic (`deriveKey`, `encryptFile`, `decryptFile`, `encryptMetadata`, `decryptMetadata`, `generateUUID`). **Any changes to these functions must maintain backward compatibility or all existing vault data will be permanently lost.**
+
+### Stylesheets
+- `src/index.css` — Global design tokens and reset.
+- `src/App.module.css` — App layout and FAB.
+- `src/components/Sidebar.module.css` — Sidebar, folder tree, chevrons.
+- `src/components/FileList.module.css` — File table, star column, dropdown menu.
+- `src/components/FileDetailView.module.css` — Detail view layout, description, properties, metadata table.
+- `src/components/UploadModal.module.css` — **Shared modal styles** (overlay, modal, header, form controls, PDF preview modal).
+- `src/components/MasterPassword.module.css` — Unlock screen with frosted glass.
+
+### Server API (Vercel Serverless)
+- `api/upload.js` — Parses encrypted file upload via `formidable` and pushes to Cloudinary.
+- `api/files.js` — Turso DB CRUD for file records (GET, POST, PUT, DELETE).
+- `api/folders.js` — Turso DB CRUD for folder records (GET, POST, DELETE). **Note: No PUT method exists** — folder editing/renaming would require adding this.
 
 ## Environment Variables Required (Vercel)
 - `MASTER_PASSWORD`: Used to authenticate API requests.
@@ -52,8 +142,18 @@ This is a personal, Zero-Knowledge End-to-End Encrypted (E2EE) Document Vault. I
 - `CLOUDINARY_API_KEY`: Cloudinary config.
 - `CLOUDINARY_API_SECRET`: Cloudinary config.
 
+## Navigation Model
+The app has no client-side router. Navigation is state-driven:
+- `currentFolder` state determines which folder's files to display.
+- `selectedFile` state determines whether the file detail view is shown (non-null) or the file list (null).
+- Selecting a sidebar folder clears `selectedFile` back to null.
+- The FAB (upload button) is hidden when the detail view is open.
+
 ## Future Development & AI Agent Guidelines
 - **Strict Scope:** Maintain the Zero-Knowledge principle. Never send unencrypted data, filenames, or file types to the backend APIs.
 - **Aesthetics:** Adhere to the existing Cupertino dark mode theme (`src/index.css`). Do not introduce brutalism, light mode, or complex colorful themes. Keep it minimalist.
-- **State Management:** The AES key (`vaultContext`) must only ever reside in React state memory. NEVER persist it to `localStorage`, `sessionStorage`, or cookies. 
+- **State Management:** The AES key (`vaultContext`) must only ever reside in React state memory. NEVER persist it to `localStorage`, `sessionStorage`, or cookies.
 - **Dependencies:** Always check package usage before adding new ones. Standardize on `lucide-react` for icons.
+- **Metadata Evolution:** When adding new fields to the encrypted metadata JSON, always provide fallback defaults during decryption to maintain backward compatibility with existing records.
+- **Shared Modal Styles:** All modals import from `UploadModal.module.css`. Add new modal styles there, not in separate files.
+- **Folder API Gap:** `api/folders.js` has no PUT endpoint. If folder renaming or editing is needed, that endpoint must be added first.

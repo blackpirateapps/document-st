@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import MasterPassword from './components/MasterPassword';
 import Sidebar from './components/Sidebar';
 import FileList from './components/FileList';
+import FileDetailView from './components/FileDetailView';
 import UploadModal from './components/UploadModal';
 import { Plus } from 'lucide-react';
 import styles from './App.module.css';
@@ -15,6 +16,9 @@ function App() {
   const [files, setFiles] = useState([]);
   const [folders, setFolders] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  // Detail view state: when a file is selected, show its detail page
+  const [selectedFile, setSelectedFile] = useState(null);
 
   const handleUnlock = ({ key, password }) => {
     setVaultContext({ aesKey: key, authPassword: password });
@@ -55,6 +59,9 @@ function App() {
               size: meta.size,
               folderId: meta.folderId,
               fileIv: meta.fileIv,
+              starred: meta.starred || false,
+              description: meta.description || '',
+              properties: meta.properties || [],
               dateAdded: meta.dateAdded || row.created_at
             };
           } catch (e) {
@@ -77,6 +84,7 @@ function App() {
               return {
                 id: row.id,
                 name: meta.name,
+                parentId: meta.parentId || null,
                 dateAdded: meta.dateAdded || row.created_at
               };
             } catch (e) {
@@ -102,16 +110,28 @@ function App() {
     return <MasterPassword onUnlock={handleUnlock} />;
   }
 
-  // Update files in state after a move/rename
+  // Update files in state after a move/rename/star/edit
   const handleFileUpdate = (updatedFile) => {
     setFiles(prev => prev.map(f => f.id === updatedFile.id ? updatedFile : f));
+    // If the detail view is open for this file, update it too
+    if (selectedFile && selectedFile.id === updatedFile.id) {
+      setSelectedFile(updatedFile);
+    }
+  };
+
+  const handleSelectFile = (file) => {
+    setSelectedFile(file);
+  };
+
+  const handleBackToList = () => {
+    setSelectedFile(null);
   };
 
   return (
     <div className={styles.appContainer}>
       <Sidebar 
         currentFolder={currentFolder} 
-        onSelectFolder={setCurrentFolder} 
+        onSelectFolder={(folderId) => { setCurrentFolder(folderId); setSelectedFile(null); }} 
         customFolders={folders}
         vaultContext={vaultContext}
         onFolderCreateSuccess={handleFolderCreateSuccess}
@@ -119,7 +139,16 @@ function App() {
       
       <main className={styles.mainContent}>
         {isLoading ? (
-          <div style={{ padding: '40px', color: 'var(--text-secondary)' }}>Decrypting vault...</div>
+          <div style={{ padding: '32px', color: 'var(--text-secondary)', fontSize: 'var(--text-subheadline)' }}>Decrypting vault...</div>
+        ) : selectedFile ? (
+          <FileDetailView
+            file={selectedFile}
+            vaultContext={vaultContext}
+            customFolders={folders}
+            onFileUpdate={handleFileUpdate}
+            onBack={handleBackToList}
+            aesKey={vaultContext.aesKey}
+          />
         ) : (
           <FileList 
             files={files} 
@@ -129,16 +158,19 @@ function App() {
             customFolders={folders}
             onFileUpdate={handleFileUpdate}
             onFileCopy={handleUploadSuccess}
+            onSelectFile={handleSelectFile}
           />
         )}
         
-        <button 
-          className={styles.fab} 
-          onClick={() => setIsUploadModalOpen(true)}
-          title="Add File"
-        >
-          <Plus size={24} />
-        </button>
+        {!selectedFile && (
+          <button 
+            className={styles.fab} 
+            onClick={() => setIsUploadModalOpen(true)}
+            title="Add File"
+          >
+            <Plus size={24} />
+          </button>
+        )}
       </main>
 
       <UploadModal 

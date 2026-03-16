@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
-import styles from './UploadModal.module.css'; // Reuse styles
+import styles from './UploadModal.module.css';
 import { encryptMetadata } from '../utils/crypto';
 
 export default function ActionModal({ 
@@ -41,6 +41,9 @@ export default function ActionModal({
         size: fileRec.size,
         folderId: actionType === 'move' ? inputValue : fileRec.folderId,
         fileIv: fileRec.fileIv,
+        starred: fileRec.starred || false,
+        description: fileRec.description || '',
+        properties: fileRec.properties || [],
         dateAdded: fileRec.dateAdded
       };
 
@@ -101,7 +104,7 @@ export default function ActionModal({
         </div>
 
         <form onSubmit={handleSubmit} className={styles.content}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          <div className={styles.formGroup}>
             
             {actionType === 'rename' ? (
               <input
@@ -111,31 +114,14 @@ export default function ActionModal({
                 placeholder="File Name"
                 disabled={isProcessing}
                 autoFocus
-                style={{
-                  width: '100%',
-                  background: 'var(--bg-primary)',
-                  border: '1px solid var(--border-color)',
-                  color: 'var(--text-primary)',
-                  padding: '10px 14px',
-                  borderRadius: 'var(--border-radius-sm)',
-                  fontSize: '15px'
-                }}
+                className={styles.formInput}
               />
             ) : (
               <select
                 value={inputValue}
                 onChange={(e) => setInputValue(e.target.value)}
                 disabled={isProcessing}
-                style={{
-                  width: '100%',
-                  background: 'var(--bg-primary)',
-                  border: '1px solid var(--border-color)',
-                  color: 'var(--text-primary)',
-                  padding: '10px 14px',
-                  borderRadius: 'var(--border-radius-sm)',
-                  fontSize: '15px',
-                  outline: 'none'
-                }}
+                className={styles.formSelect}
               >
                 {allFolders.map(f => (
                   <option key={f.id} value={f.id}>{f.label}</option>
@@ -146,16 +132,7 @@ export default function ActionModal({
             <button
               type="submit"
               disabled={isProcessing || !inputValue.trim() || inputValue === (actionType === 'rename' ? fileRec.originalName : fileRec.folderId)}
-              style={{
-                width: '100%',
-                backgroundColor: 'var(--accent-blue)',
-                color: '#fff',
-                padding: '10px',
-                borderRadius: 'var(--border-radius-sm)',
-                fontSize: '15px',
-                fontWeight: 500,
-                opacity: (isProcessing || !inputValue.trim()) ? 0.5 : 1
-              }}
+              className={styles.submitBtn}
             >
               {isProcessing ? 'Saving...' : 'Save'}
             </button>

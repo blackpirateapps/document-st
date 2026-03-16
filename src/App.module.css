@@ -11,31 +11,34 @@
   position: relative;
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 
+/* ── Floating Action Button (Apple-style) ── */
 .fab {
   position: absolute;
-  bottom: 40px;
-  right: 40px;
-  width: 56px;
-  height: 56px;
-  border-radius: var(--border-radius-full);
-  background-color: var(--accent-blue);
+  bottom: 32px;
+  right: 32px;
+  width: 52px;
+  height: 52px;
+  border-radius: var(--radius-full);
+  background: var(--accent-blue);
   color: #fff;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: var(--shadow-md);
-  transition: transform 0.2s, background-color 0.2s, box-shadow 0.2s;
+  box-shadow: var(--shadow-md), var(--shadow-glow-blue);
+  transition: all var(--duration-normal) var(--ease-spring);
   z-index: 10;
 }
 
 .fab:hover {
-  background-color: var(--accent-blue-hover);
-  transform: scale(1.05);
-  box-shadow: var(--shadow-lg);
+  background: var(--accent-blue-hover);
+  transform: scale(1.06);
+  box-shadow: var(--shadow-lg), var(--shadow-glow-blue);
 }
 
 .fab:active {
-  transform: scale(0.95);
+  transform: scale(0.94);
+  transition-duration: var(--duration-fast);
 }

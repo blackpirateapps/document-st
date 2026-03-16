@@ -1,0 +1,351 @@
+/* ── FileDetailView (Apple-style detail panel) ── */
+
+.container {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow-y: auto;
+  padding: 0;
+}
+
+/* ── Top Bar ── */
+.topBar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 24px;
+  border-bottom: 0.5px solid var(--separator);
+  background: var(--vibrancy-thin);
+  backdrop-filter: blur(12px) saturate(150%);
+  -webkit-backdrop-filter: blur(12px) saturate(150%);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+
+.backBtn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-blue);
+  font-size: var(--text-subheadline);
+  font-weight: 500;
+  padding: 6px 10px;
+  border-radius: var(--radius-md);
+  transition: all var(--duration-fast) var(--ease-default);
+  letter-spacing: -0.01em;
+}
+
+.backBtn:hover {
+  background: var(--fill-quaternary);
+}
+
+.backBtn:active {
+  transform: scale(0.97);
+}
+
+.topBarTitle {
+  flex: 1;
+  font-size: var(--text-subheadline);
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.topBarActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.iconBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  transition: all var(--duration-fast) var(--ease-default);
+}
+
+.iconBtn:hover {
+  background: var(--fill-tertiary);
+  color: var(--text-primary);
+}
+
+.iconBtn:active {
+  transform: scale(0.92);
+}
+
+.starActive {
+  color: var(--system-orange) !important;
+}
+
+/* ── Body ── */
+.body {
+  flex: 1;
+  padding: 28px 24px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 28px;
+  max-width: 680px;
+}
+
+/* ── File Header ── */
+.fileHeader {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.fileIconBox {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius-lg);
+  background: var(--fill-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-blue);
+  flex-shrink: 0;
+}
+
+.fileHeaderInfo {
+  flex: 1;
+  min-width: 0;
+}
+
+.fileHeaderName {
+  font-size: var(--text-title3);
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.fileHeaderMeta {
+  font-size: var(--text-caption1);
+  color: var(--text-tertiary);
+  margin-top: 4px;
+  letter-spacing: -0.01em;
+}
+
+/* ── Section ── */
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sectionLabel {
+  font-size: var(--text-caption1);
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+/* ── Description ── */
+.descriptionTextarea {
+  width: 100%;
+  min-height: 80px;
+  background: var(--fill-quaternary);
+  border: 0.5px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-subheadline);
+  font-family: var(--font-family);
+  letter-spacing: -0.01em;
+  line-height: 1.5;
+  resize: vertical;
+  transition: all var(--duration-fast) var(--ease-default);
+}
+
+.descriptionTextarea:focus {
+  border-color: var(--border-focused);
+  box-shadow: 0 0 0 3px var(--accent-blue-dim);
+  background: rgba(120, 120, 128, 0.12);
+}
+
+.descriptionTextarea::placeholder {
+  color: var(--text-tertiary);
+}
+
+/* ── Properties ── */
+.propertiesList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.propertyRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.propertyInput {
+  flex: 1;
+  background: var(--fill-quaternary);
+  border: 0.5px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-footnote);
+  font-family: var(--font-family);
+  letter-spacing: -0.01em;
+  transition: all var(--duration-fast) var(--ease-default);
+}
+
+.propertyInput:focus {
+  border-color: var(--border-focused);
+  box-shadow: 0 0 0 3px var(--accent-blue-dim);
+  background: rgba(120, 120, 128, 0.12);
+}
+
+.propertyInput::placeholder {
+  color: var(--text-tertiary);
+}
+
+.removePropertyBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: all var(--duration-fast) var(--ease-default);
+}
+
+.removePropertyBtn:hover {
+  background: var(--danger-red-dim);
+  color: var(--danger-red);
+}
+
+.addPropertyBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent-blue);
+  font-size: var(--text-footnote);
+  font-weight: 500;
+  padding: 6px 0;
+  transition: color var(--duration-fast) var(--ease-default);
+}
+
+.addPropertyBtn:hover {
+  color: var(--accent-blue-hover);
+}
+
+/* ── Metadata Table ── */
+.metadataTable {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--fill-quaternary);
+  border-radius: var(--radius-md);
+  border: 0.5px solid var(--border-color);
+  overflow: hidden;
+}
+
+.metadataRow {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  border-bottom: 0.5px solid var(--border-light);
+}
+
+.metadataRow:last-child {
+  border-bottom: none;
+}
+
+.metadataKey {
+  flex: 0 0 110px;
+  font-size: var(--text-footnote);
+  color: var(--text-secondary);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.metadataValue {
+  flex: 1;
+  font-size: var(--text-footnote);
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+  word-break: break-all;
+}
+
+/* ── Save Button ── */
+.saveBtn {
+  align-self: flex-start;
+  background: var(--accent-blue);
+  color: #fff;
+  padding: 10px 24px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-subheadline);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  transition: all var(--duration-fast) var(--ease-default);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+}
+
+.saveBtn:hover:not(:disabled) {
+  background: var(--accent-blue-hover);
+  box-shadow: var(--shadow-sm), 0 0 12px rgba(10, 132, 255, 0.2);
+}
+
+.saveBtn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.saveBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Preview Button ── */
+.previewBtn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--accent-blue);
+  font-size: var(--text-subheadline);
+  font-weight: 500;
+  padding: 8px 14px;
+  border-radius: var(--radius-md);
+  background: var(--accent-blue-dim);
+  border: 0.5px solid rgba(10, 132, 255, 0.2);
+  transition: all var(--duration-fast) var(--ease-default);
+  align-self: flex-start;
+}
+
+.previewBtn:hover {
+  background: rgba(10, 132, 255, 0.22);
+  border-color: rgba(10, 132, 255, 0.35);
+}
+
+.previewBtn:active {
+  transform: scale(0.97);
+}
+
+/* ── Folder Badge ── */
+.folderBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: var(--fill-tertiary);
+  padding: 3px 10px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-caption1);
+  color: var(--text-secondary);
+  font-weight: 500;
+}

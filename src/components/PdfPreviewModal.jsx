@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Download } from 'lucide-react';
-import styles from './UploadModal.module.css'; // Reuse overlay and some modal styles
+import styles from './UploadModal.module.css';
 import { decryptFile } from '../utils/crypto';
 
 export default function PdfPreviewModal({ isOpen, onClose, fileRec, aesKey }) {
@@ -54,54 +54,44 @@ export default function PdfPreviewModal({ isOpen, onClose, fileRec, aesKey }) {
   if (!isOpen || !fileRec) return null;
 
   return (
-    <div className={styles.overlay} style={{ zIndex: 1000, padding: '24px' }}>
-      <div 
-        style={{ 
-          backgroundColor: 'var(--bg-secondary)', 
-          borderRadius: 'var(--border-radius-lg)',
-          width: '100%',
-          maxWidth: '1200px',
-          height: '100%',
-          display: 'flex',
-          flexDirection: 'column',
-          border: '1px solid var(--border-color)',
-          boxShadow: 'var(--shadow-lg)'
-        }}
-      >
-        <div className={styles.header} style={{ flexShrink: 0 }}>
-          <h3 className={styles.title} style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <span>{fileRec.originalName}</span>
-            {objectUrl && (
-              <a 
-                href={objectUrl} 
-                download={fileRec.originalName}
-                style={{ color: 'var(--text-secondary)', marginLeft: '16px' }}
-                title="Download"
-              >
-                <Download size={18} />
-              </a>
-            )}
+    <div className={`${styles.overlay} ${styles.previewOverlay}`}>
+      <div className={styles.previewModal}>
+        <div className={`${styles.header} ${styles.previewHeader}`}>
+          <h3 className={styles.title}>
+            <span className={styles.previewTitleRow}>
+              <span>{fileRec.originalName}</span>
+              {objectUrl && (
+                <a 
+                  href={objectUrl} 
+                  download={fileRec.originalName}
+                  className={styles.previewDownloadLink}
+                  title="Download"
+                >
+                  <Download size={18} />
+                </a>
+              )}
+            </span>
           </h3>
           <button className={styles.closeBtn} onClick={onClose}>
             <X size={20} />
           </button>
         </div>
 
-        <div style={{ flex: 1, position: 'relative', overflow: 'hidden', backgroundColor: '#e5e5ea' }}>
+        <div className={styles.previewBody}>
           {isLoading && (
-            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: '#000' }}>
+            <div className={styles.previewLoading}>
               Decrypting PDF...
             </div>
           )}
           {error && (
-            <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', color: 'var(--danger-red)' }}>
+            <div className={styles.previewError}>
               {error}
             </div>
           )}
           {objectUrl && !isLoading && (
             <iframe 
               src={`${objectUrl}#toolbar=0`} 
-              style={{ width: '100%', height: '100%', border: 'none' }}
+              className={styles.previewIframe}
               title="PDF Preview"
             />
           )}
