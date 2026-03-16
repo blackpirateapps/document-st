@@ -29,6 +29,37 @@
   margin-bottom: 24px;
 }
 
+.sectionHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px;
+  margin-bottom: 8px;
+}
+
+.sectionTitle {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+
+.addFolderBtn {
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.addFolderBtn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
 .list {
   list-style: none;
 }
@@ -60,6 +91,13 @@
 .icon {
   margin-right: 12px;
   opacity: 0.8;
+  flex-shrink: 0;
+}
+
+.folderNameText {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .footer {

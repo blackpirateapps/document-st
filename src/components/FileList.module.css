@@ -99,7 +99,7 @@
 
 .actions {
   text-align: right;
-  width: 60px;
+  width: 100px;
 }
 
 .downloadBtn {
@@ -120,6 +120,73 @@
 .downloadBtn:disabled {
   opacity: 0.5;
   cursor: wait;
+}
+
+.menuBtn {
+  color: var(--text-secondary);
+  padding: 8px;
+  border-radius: var(--border-radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.menuBtn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.dropdownMenu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  background-color: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  box-shadow: var(--shadow-lg);
+  width: 160px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px 0;
+  z-index: 50;
+  animation: slideDown 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes slideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.dropdownMenu button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  color: var(--text-primary);
+  font-size: 14px;
+  width: 100%;
+  text-align: left;
+  transition: background-color 0.15s;
+}
+
+.dropdownMenu button:hover {
+  background-color: var(--bg-tertiary);
+}
+
+.menuDivider {
+  height: 1px;
+  background-color: var(--border-color);
+  margin: 4px 0;
+}
+
+.dangerAction {
+  color: var(--danger-red) !important;
+}
+
+.dangerAction:hover {
+  background-color: rgba(255, 69, 58, 0.1) !important;
 }
 
 .spinner {

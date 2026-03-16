@@ -7,32 +7,42 @@ This is a personal, Zero-Knowledge End-to-End Encrypted (E2EE) Document Vault. I
 - **Frontend Framework:** React built with Vite.
 - **Styling:** Vanilla CSS Modules with a strict, Cupertino-inspired (Apple/Things 3) dark mode aesthetic.
 - **Backend/API:** Vercel Serverless Functions (`/api`).
-- **Database:** Turso DB (LibSQL) for storing encrypted metadata.
+- **Database:** Turso DB (LibSQL) for storing encrypted metadata. Uses `files` and `folders` tables.
 - **Object Storage:** Cloudinary for storing encrypted file blobs.
 - **Cryptography:** Native Browser Web Crypto API (AES-GCM 256-bit, PBKDF2).
 
 ## Security & Encryption Flow (Zero-Knowledge)
 1. **Master Password:** The user enters a master password on the frontend.
-2. **Authentication:** The frontend sends the raw password as a Bearer token to `/api/files` to authenticate.
-3. **Key Derivation:** Locally, the frontend derives a 256-bit AES-GCM key from the master password using PBKDF2 and a static salt (Note: In a more robust production setup, the salt should be unique per user and fetched from an unauthenticated endpoint).
+2. **Authentication:** The frontend sends the raw password as a Bearer token to `/api/files` and `/api/folders` to authenticate.
+3. **Key Derivation:** Locally, the frontend derives a 256-bit AES-GCM key from the master password using PBKDF2 and a static salt.
 4. **File Encryption (Upload):**
    - The selected `File` object is converted to an `ArrayBuffer` and encrypted locally via `crypto.subtle.encrypt` (AES-GCM).
    - The *encrypted blob* is sent to the Vercel API (`/api/upload`) and stored directly in Cloudinary. Cloudinary only sees random bytes.
-5. **Metadata Encryption (Upload):**
+5. **Metadata & Folder Encryption:**
    - Sensitive metadata (original filename, file type, file size, folder location, and the IV used to encrypt the blob) is bundled into a JSON object.
    - This JSON object is encrypted locally using the same AES key.
-   - The *encrypted metadata string* (Base64) and the Cloudinary URL are sent to Turso DB (`/api/files`). Turso only sees random strings and UUIDs.
+   - The *encrypted metadata string* (Base64) and the Cloudinary URL are sent to Turso DB (`/api/files`). Folder names are similarly encrypted and sent to `folders` table.
 6. **Decryption (Download/View):**
    - The frontend fetches all encrypted metadata records from Turso.
-   - It decrypts the metadata locally using the key in memory to restore the file list UI.
+   - It decrypts the metadata locally using the key in memory to restore the file and folder lists.
    - When a user clicks "Download", the app fetches the encrypted blob from Cloudinary, decrypts it locally using the AES key and the specific IV stored in the decrypted metadata, and triggers a local browser download via `URL.createObjectURL`.
+   - **PDF Previews:** For PDFs, the blob is decrypted into memory and fed to an iframe via an Object URL, enabling secure, local previewing.
+
+## Features & File Operations
+- **Upload & Decrypt:** Full E2EE flow.
+- **Custom Folders:** Users can create custom virtual folders. Folder names are encrypted.
+- **Move & Rename:** Achieved by updating the local metadata JSON, re-encrypting it, and using a `PUT` request to update the database record. The underlying secure blob remains untouched.
+- **Copy:** Achieved by duplicating the metadata (appending " Copy"), encrypting it, and creating a new DB record that points to the exact *same* `cloudinary_url` and uses the same `fileIv`.
+- **Trash:** Moves the file to a virtual `folderId: 'trash'`.
+- **PDF Preview:** Integrated modal for viewing PDF files securely without exposing them to the server.
 
 ## Key Files & Responsibilities
 - `src/utils/crypto.js`: Contains all Web Crypto API logic (`deriveKey`, `encryptFile`, `decryptFile`, `encryptMetadata`, `decryptMetadata`). *CRITICAL: Any changes to these functions must maintain backward compatibility or all existing vault data will be permanently lost.*
 - `src/components/UploadModal.jsx`: Orchestrates the complex multi-step upload flow (local encryption -> Cloudinary upload -> metadata encryption -> Turso DB save).
-- `src/components/FileList.jsx`: Handles the UI for the virtual folders and the download/decryption logic.
+- `src/components/FileList.jsx`: Handles the UI for the virtual folders, the context menu for file operations, and the download/decryption logic.
+- `src/components/ActionModal.jsx` & `FolderModal.jsx`: Manage metadata re-encryption for operations.
 - `api/upload.js`: Vercel Serverless function. Uses `formidable` to parse the encrypted file upload and pushes it to Cloudinary.
-- `api/files.js`: Vercel Serverless function. Handles saving and retrieving records from Turso DB.
+- `api/files.js` & `api/folders.js`: Vercel Serverless functions handling Turso DB CRUD.
 
 ## Environment Variables Required (Vercel)
 - `MASTER_PASSWORD`: Used to authenticate API requests.

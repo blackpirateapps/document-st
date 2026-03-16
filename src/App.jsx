@@ -13,6 +13,7 @@ function App() {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   
   const [files, setFiles] = useState([]);
+  const [folders, setFolders] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleUnlock = ({ key, password }) => {
@@ -23,26 +24,29 @@ function App() {
     setFiles(prev => [newFileRecord, ...prev]);
   };
 
-  // Fetch and decrypt files when unlocked
+  const handleFolderCreateSuccess = (newFolderRecord) => {
+    setFolders(prev => [...prev, newFolderRecord]);
+  };
+
+  // Fetch and decrypt files and folders when unlocked
   useEffect(() => {
     if (!vaultContext) return;
 
-    const fetchFiles = async () => {
+    const fetchData = async () => {
       setIsLoading(true);
       try {
-        const res = await fetch('/api/files', {
+        // Fetch files
+        const resFiles = await fetch('/api/files', {
           headers: { 'Authorization': `Bearer ${vaultContext.authPassword}` }
         });
-        if (!res.ok) throw new Error('Failed to fetch files');
-        
-        const data = await res.json();
+        if (!resFiles.ok) throw new Error('Failed to fetch files');
+        const fileData = await resFiles.json();
 
-        // Decrypt metadata for all files
-        const decryptedFiles = await Promise.all(data.map(async (row) => {
+        // Decrypt files
+        const decryptedFiles = await Promise.all(fileData.map(async (row) => {
           try {
             const ivArray = JSON.parse(row.metadata_iv);
             const meta = await decryptMetadata(row.encrypted_metadata, ivArray, vaultContext.aesKey);
-            
             return {
               id: row.id,
               cloudinary_url: row.cloudinary_url,
@@ -50,16 +54,39 @@ function App() {
               originalType: meta.originalType,
               size: meta.size,
               folderId: meta.folderId,
-              fileIv: meta.fileIv, // The IV for the blob
+              fileIv: meta.fileIv,
               dateAdded: meta.dateAdded || row.created_at
             };
           } catch (e) {
-            console.error('Failed to decrypt metadata for file', row.id, e);
-            return null; // Skip if decryption fails
+            console.error('Failed to decrypt file', row.id, e);
+            return null;
           }
         }));
-
         setFiles(decryptedFiles.filter(Boolean));
+
+        // Fetch folders
+        const resFolders = await fetch('/api/folders', {
+          headers: { 'Authorization': `Bearer ${vaultContext.authPassword}` }
+        });
+        if (resFolders.ok) {
+          const folderData = await resFolders.json();
+          const decryptedFolders = await Promise.all(folderData.map(async (row) => {
+            try {
+              const ivArray = JSON.parse(row.metadata_iv);
+              const meta = await decryptMetadata(row.encrypted_metadata, ivArray, vaultContext.aesKey);
+              return {
+                id: row.id,
+                name: meta.name,
+                dateAdded: meta.dateAdded || row.created_at
+              };
+            } catch (e) {
+              console.error('Failed to decrypt folder', row.id, e);
+              return null;
+            }
+          }));
+          setFolders(decryptedFolders.filter(Boolean));
+        }
+
       } catch (err) {
         console.error(err);
       } finally {
@@ -67,7 +94,7 @@ function App() {
       }
     };
 
-    fetchFiles();
+    fetchData();
   }, [vaultContext]);
 
   // If the vault is locked, show the unlock screen
@@ -75,11 +102,19 @@ function App() {
     return <MasterPassword onUnlock={handleUnlock} />;
   }
 
+  // Update files in state after a move/rename
+  const handleFileUpdate = (updatedFile) => {
+    setFiles(prev => prev.map(f => f.id === updatedFile.id ? updatedFile : f));
+  };
+
   return (
     <div className={styles.appContainer}>
       <Sidebar 
         currentFolder={currentFolder} 
         onSelectFolder={setCurrentFolder} 
+        customFolders={folders}
+        vaultContext={vaultContext}
+        onFolderCreateSuccess={handleFolderCreateSuccess}
       />
       
       <main className={styles.mainContent}>
@@ -89,7 +124,11 @@ function App() {
           <FileList 
             files={files} 
             aesKey={vaultContext.aesKey} 
-            currentFolder={currentFolder} 
+            currentFolder={currentFolder}
+            vaultContext={vaultContext}
+            customFolders={folders}
+            onFileUpdate={handleFileUpdate}
+            onFileCopy={handleUploadSuccess}
           />
         )}
         
@@ -107,6 +146,7 @@ function App() {
         onClose={() => setIsUploadModalOpen(false)} 
         vaultContext={vaultContext}
         currentFolder={currentFolder}
+        customFolders={folders}
         onUploadSuccess={handleUploadSuccess}
       />
     </div>
