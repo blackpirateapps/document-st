@@ -1,0 +1,41 @@
+.appContainer {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+  background-color: var(--bg-primary);
+  overflow: hidden;
+}
+
+.mainContent {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.fab {
+  position: absolute;
+  bottom: 40px;
+  right: 40px;
+  width: 56px;
+  height: 56px;
+  border-radius: var(--border-radius-full);
+  background-color: var(--accent-blue);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: var(--shadow-md);
+  transition: transform 0.2s, background-color 0.2s, box-shadow 0.2s;
+  z-index: 10;
+}
+
+.fab:hover {
+  background-color: var(--accent-blue-hover);
+  transform: scale(1.05);
+  box-shadow: var(--shadow-lg);
+}
+
+.fab:active {
+  transform: scale(0.95);
+}

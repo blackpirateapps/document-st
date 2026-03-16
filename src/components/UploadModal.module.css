@@ -1,0 +1,116 @@
+.overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background-color: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+  animation: fadeIn 0.2s ease-out;
+}
+
+.modal {
+  background-color: var(--bg-secondary);
+  border-radius: var(--border-radius-lg);
+  border: 1px solid var(--border-color);
+  box-shadow: var(--shadow-lg);
+  width: 100%;
+  max-width: 440px;
+  display: flex;
+  flex-direction: column;
+  animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 24px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.closeBtn {
+  color: var(--text-secondary);
+  padding: 4px;
+  border-radius: var(--border-radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background-color 0.2s;
+}
+
+.closeBtn:hover {
+  background-color: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+.content {
+  padding: 32px 24px;
+}
+
+.hiddenInput {
+  display: none;
+}
+
+.uploadArea {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40px 20px;
+  border: 2px dashed var(--border-color);
+  border-radius: var(--border-radius-md);
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
+}
+
+.uploadArea:hover {
+  border-color: var(--accent-blue);
+  background-color: rgba(10, 132, 255, 0.05);
+}
+
+.uploadIconContainer {
+  width: 56px;
+  height: 56px;
+  background-color: var(--bg-tertiary);
+  border-radius: var(--border-radius-full);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 16px;
+  color: var(--accent-blue);
+}
+
+.uploadText {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.uploadSubtext {
+  font-size: 13px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
