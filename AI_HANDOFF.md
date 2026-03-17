@@ -286,6 +286,7 @@ Main layout with responsive behavior:
 - **Note:** `flutter analyze` and `flutter test` have `continue-on-error: true` to not block APK builds during initial development.
 
 ### Known Issues & Future Work
+- **Release build breakage fixed (Mar 2026):** `CupertinoIcons.key_fill` is not available in Flutter 3.24, so `mobile/lib/screens/file_detail_screen.dart` now uses `CupertinoIcons.key` in the Encryption section to keep `assembleRelease` compiling.
 - **CI Android toolchain finding resolved:** Plugins now require NDK `26.1.10909125`; app config pins this NDK version explicitly in `android/app/build.gradle`.
 - **CI resource linking finding resolved:** Missing launcher icon resource (`@mipmap/ic_launcher`) was added via XML drawable resources under `android/app/src/main/res/`.
 - **PDF preview** depends on writing a temp file to device storage; may need storage permissions on some Android versions. PDF dark mode bug was fixed (`nightMode: false` with white background).
