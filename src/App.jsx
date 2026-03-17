@@ -4,6 +4,7 @@ import Sidebar from './components/Sidebar';
 import FileList from './components/FileList';
 import FileDetailView from './components/FileDetailView';
 import UploadModal from './components/UploadModal';
+import RecoverySettings from './components/RecoverySettings';
 import { Plus, Menu } from 'lucide-react';
 import styles from './App.module.css';
 import {
@@ -325,6 +326,71 @@ function App() {
     }
   };
 
+  const refreshVaultData = async () => {
+    if (!vaultContext) return;
+    setIsLoading(true);
+    try {
+      const resFiles = await fetch('/api/files', {
+        headers: { Authorization: `Bearer ${vaultContext.authPassword}` },
+      });
+      if (!resFiles.ok) throw new Error('Failed to fetch files');
+      const fileData = await resFiles.json();
+
+      const decryptedFiles = await Promise.all(
+        fileData.map(async (row) => {
+          try {
+            const ivArray = JSON.parse(row.metadata_iv);
+            const meta = await decryptMetadata(
+              row.encrypted_metadata,
+              ivArray,
+              vaultContext.aesKey,
+            );
+            const normalized = normalizeFileMetadata(meta, row.created_at);
+            return {
+              id: row.id,
+              cloudinary_url: row.cloudinary_url,
+              ...normalized,
+            };
+          } catch (_) {
+            return null;
+          }
+        }),
+      );
+
+      const resFolders = await fetch('/api/folders', {
+        headers: { Authorization: `Bearer ${vaultContext.authPassword}` },
+      });
+      const validFiles = decryptedFiles.filter(Boolean);
+      if (resFolders.ok) {
+        const folderData = await resFolders.json();
+        const decryptedFolders = await Promise.all(
+          folderData.map(async (row) => {
+            try {
+              const ivArray = JSON.parse(row.metadata_iv);
+              const meta = await decryptMetadata(
+                row.encrypted_metadata,
+                ivArray,
+                vaultContext.aesKey,
+              );
+              return {
+                id: row.id,
+                ...normalizeFolderMetadata(meta, row.created_at),
+              };
+            } catch (_) {
+              return null;
+            }
+          }),
+        );
+        setFiles(validFiles);
+        setFolders(decryptedFolders.filter(Boolean));
+      } else {
+        setFiles(validFiles);
+      }
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!vaultContext) return;
 
@@ -432,7 +498,7 @@ function App() {
   }, [vaultContext]);
 
   useEffect(() => {
-    if (!vaultContext || recoveryState.needed) return;
+    if (!vaultContext || recoveryState.needed || currentFolder === 'settings') return;
 
     const hasFiles = (event) => {
       const types = event.dataTransfer?.types;
@@ -527,6 +593,11 @@ function App() {
           setSelectedFile(null);
           setIsSidebarOpen(false);
         }}
+        onOpenSettings={() => {
+          setCurrentFolder('settings');
+          setSelectedFile(null);
+          setIsSidebarOpen(false);
+        }}
         customFolders={folders}
         vaultContext={vaultContext}
         onFolderCreateSuccess={handleFolderCreateSuccess}
@@ -584,6 +655,11 @@ function App() {
               </button>
             </div>
           </div>
+        ) : currentFolder === 'settings' ? (
+          <RecoverySettings
+            vaultContext={vaultContext}
+            onMigrationApplied={refreshVaultData}
+          />
         ) : selectedFile ? (
           <FileDetailView
             file={selectedFile}
@@ -606,7 +682,7 @@ function App() {
           />
         )}
 
-        {!selectedFile && !recoveryState.needed && (
+        {!selectedFile && !recoveryState.needed && currentFolder !== 'settings' && (
           <button
             className={styles.fab}
             onClick={() => setIsUploadModalOpen(true)}

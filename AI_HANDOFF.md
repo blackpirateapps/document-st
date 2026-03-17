@@ -128,6 +128,7 @@ All design tokens are defined in `src/index.css` `:root`. Components reference C
 ### Source Components
 - `src/App.jsx` — Root component. Manages vault state, folder navigation, file/folder decryption, selected file state for detail view. Hides FAB when detail view is open.
 - `src/App.jsx` — Also contains the web vault recovery UI/workflow: detects decryption mismatch after successful auth, prompts for previous password, then re-encrypts all file blobs + metadata and folder metadata.
+- `src/components/RecoverySettings.jsx` — Web-only settings panel for per-entry recovery: scans for file rows that fail decryption with current key, lets user provide previous password for one selected entry, decrypts + re-encrypts that item, and writes updated blob+metadata.
 - `src/components/MasterPassword.jsx` — Unlock screen with master password input and key derivation.
 - `src/components/Sidebar.jsx` — Navigation sidebar with default folders, recursive `FolderTreeItem` for custom folder hierarchy, expand/collapse, subfolder creation.
 - `src/components/FileList.jsx` — File table with star toggle, click-to-open (PDF -> preview, others -> detail), context menu (preview, details, rename, move, copy, trash), download.
@@ -294,6 +295,7 @@ Main layout with responsive behavior:
 - **Note:** `flutter analyze` and `flutter test` have `continue-on-error: true` to not block APK builds during initial development.
 
 ### Known Issues & Future Work
+- **Web granular recovery added (Mar 2026):** Settings now includes a per-entry recovery tool for failed file decryptions when full-vault migration is not available or previously failed.
 - **Direct Cloudinary uploads implemented (Mar 2026):** Web and Flutter now upload encrypted blobs directly to Cloudinary using unsigned preset `vercel` (via `/api/cloudinary-config`) to avoid Vercel function upload timeouts.
 - **Mobile vault visibility bug fixed (Mar 2026):** Adjusted recovery-trigger detection so empty decrypt results caused by schema/data edge cases no longer hide valid uploads/trash views.
 - **Password rotation recovery implemented (Mar 2026):** Both web and Flutter now detect all-row decryption failure after successful auth and prompt for the previous decryption password to migrate data.

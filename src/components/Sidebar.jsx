@@ -57,7 +57,7 @@ function FolderTreeItem({ folder, currentFolder, onSelectFolder, customFolders, 
   );
 }
 
-export default function Sidebar({ currentFolder, onSelectFolder, customFolders = [], vaultContext, onFolderCreateSuccess, isMobileOpen = false, onCloseMobile }) {
+export default function Sidebar({ currentFolder, onSelectFolder, onOpenSettings, customFolders = [], vaultContext, onFolderCreateSuccess, isMobileOpen = false, onCloseMobile }) {
   const [folderModalState, setFolderModalState] = useState({ isOpen: false, parentId: null });
 
   const defaultFolders = [
@@ -145,7 +145,10 @@ export default function Sidebar({ currentFolder, onSelectFolder, customFolders =
       </nav>
 
       <div className={styles.footer}>
-        <button className={styles.button}>
+        <button
+          className={clsx(styles.button, currentFolder === 'settings' && styles.active)}
+          onClick={onOpenSettings}
+        >
           <span className={styles.chevronSpacer} />
           <Settings size={16} className={styles.icon} />
           <span>Settings</span>
