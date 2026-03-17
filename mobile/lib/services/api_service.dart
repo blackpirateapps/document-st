@@ -62,15 +62,21 @@ class ApiService {
     required String id,
     required String encryptedMetadata,
     required String metadataIv,
+    String? cloudinaryUrl,
   }) async {
+    final payload = <String, dynamic>{
+      'id': id,
+      'encrypted_metadata': encryptedMetadata,
+      'metadata_iv': metadataIv,
+    };
+    if (cloudinaryUrl != null) {
+      payload['cloudinary_url'] = cloudinaryUrl;
+    }
+
     final response = await http.put(
       Uri.parse('$baseUrl/api/files'),
       headers: _headers,
-      body: jsonEncode({
-        'id': id,
-        'encrypted_metadata': encryptedMetadata,
-        'metadata_iv': metadataIv,
-      }),
+      body: jsonEncode(payload),
     );
     if (response.statusCode != 200) {
       throw Exception('Failed to update file: ${response.statusCode}');
@@ -109,6 +115,26 @@ class ApiService {
     );
     if (response.statusCode != 201) {
       throw Exception('Failed to create folder: ${response.statusCode}');
+    }
+  }
+
+  /// PUT /api/folders
+  Future<void> updateFolder({
+    required String id,
+    required String encryptedMetadata,
+    required String metadataIv,
+  }) async {
+    final response = await http.put(
+      Uri.parse('$baseUrl/api/folders'),
+      headers: _headers,
+      body: jsonEncode({
+        'id': id,
+        'encrypted_metadata': encryptedMetadata,
+        'metadata_iv': metadataIv,
+      }),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to update folder: ${response.statusCode}');
     }
   }
 

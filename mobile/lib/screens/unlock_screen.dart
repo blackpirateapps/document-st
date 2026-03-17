@@ -12,6 +12,7 @@ class UnlockScreen extends StatefulWidget {
 
 class _UnlockScreenState extends State<UnlockScreen> {
   final _controller = TextEditingController();
+  final _previousPasswordController = TextEditingController();
   bool _isLoading = false;
   String? _error;
 
@@ -25,19 +26,147 @@ class _UnlockScreenState extends State<UnlockScreen> {
     });
 
     final vault = context.read<VaultProvider>();
-    final success = await vault.unlock(password);
+    final result = await vault.unlock(password);
 
-    if (!success && mounted) {
+    if (!mounted) return;
+
+    if (result.status == UnlockStatus.success) {
       setState(() {
         _isLoading = false;
-        _error = 'Invalid master password.';
       });
+      return;
     }
+
+    if (result.status == UnlockStatus.needsRecovery) {
+      setState(() {
+        _isLoading = false;
+      });
+      _showRecoveryDialog();
+      return;
+    }
+
+    setState(() {
+      _isLoading = false;
+      _error = result.message ?? 'Invalid master password.';
+    });
+  }
+
+  Future<void> _showRecoveryDialog() async {
+    _previousPasswordController.clear();
+    final vault = context.read<VaultProvider>();
+
+    await showCupertinoDialog(
+      context: context,
+      builder: (ctx) {
+        bool isRecovering = false;
+        String? localError;
+
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) => CupertinoAlertDialog(
+            title: const Text('Re-encrypt Vault'),
+            content: Column(
+              children: [
+                const SizedBox(height: 8),
+                Text(
+                  'We detected encrypted data that cannot be decrypted with the current password. Enter the previous decryption password to migrate ${vault.recoveryItemsCount} item(s).',
+                  style: const TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 12),
+                CupertinoTextField(
+                  controller: _previousPasswordController,
+                  obscureText: true,
+                  placeholder: 'Previous decryption password',
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                ),
+                if (localError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    localError!,
+                    style: const TextStyle(
+                      color: AppTheme.dangerRed,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              CupertinoDialogAction(
+                onPressed: isRecovering ? null : () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              CupertinoDialogAction(
+                isDefaultAction: true,
+                onPressed: isRecovering
+                    ? null
+                    : () async {
+                        final previous = _previousPasswordController.text
+                            .trim();
+                        if (previous.isEmpty) {
+                          setDialogState(() {
+                            localError =
+                                'Enter the previous decryption password.';
+                          });
+                          return;
+                        }
+
+                        setDialogState(() {
+                          isRecovering = true;
+                          localError = null;
+                        });
+
+                        final recovery = await vault
+                            .recoverVaultWithPreviousPassword(previous);
+
+                        if (!mounted) return;
+
+                        if (!recovery.success) {
+                          setDialogState(() {
+                            isRecovering = false;
+                            localError = recovery.message;
+                          });
+                          return;
+                        }
+
+                        if (ctx.mounted) {
+                          Navigator.pop(ctx);
+                        }
+                        if (mounted) {
+                          showCupertinoDialog(
+                            context: dialogContext,
+                            builder: (dctx) => CupertinoAlertDialog(
+                              title: const Text('Migration Complete'),
+                              content: const Text(
+                                'Vault data was re-encrypted with your current password.',
+                              ),
+                              actions: [
+                                CupertinoDialogAction(
+                                  child: const Text('OK'),
+                                  onPressed: () => Navigator.pop(dctx),
+                                ),
+                              ],
+                            ),
+                          );
+                        }
+                      },
+                child: isRecovering
+                    ? const CupertinoActivityIndicator()
+                    : const Text('Migrate'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   @override
   void dispose() {
     _controller.dispose();
+    _previousPasswordController.dispose();
     super.dispose();
   }
 

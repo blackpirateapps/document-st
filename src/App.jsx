@@ -6,13 +6,58 @@ import FileDetailView from './components/FileDetailView';
 import UploadModal from './components/UploadModal';
 import { Plus, Menu } from 'lucide-react';
 import styles from './App.module.css';
-import { decryptMetadata, encryptFile, encryptMetadata, generateUUID } from './utils/crypto';
+import {
+  decryptMetadata,
+  decryptFile,
+  deriveKey,
+  encryptFile,
+  encryptMetadata,
+  generateUUID,
+} from './utils/crypto';
+
+const STATIC_SALT = new Uint8Array([
+  1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
+]);
+
+function normalizeFileMetadata(meta, fallbackDate) {
+  const rawProps = Array.isArray(meta?.properties) ? meta.properties : [];
+  const properties = rawProps.map((p) => ({
+    key: p?.key?.toString?.() || '',
+    value: p?.value?.toString?.() || '',
+  }));
+  const fileIv = Array.isArray(meta?.fileIv)
+    ? meta.fileIv.map((v) => Number(v))
+    : [];
+
+  return {
+    originalName: meta?.originalName?.toString?.() || 'Unknown',
+    originalType:
+      meta?.originalType?.toString?.() || 'application/octet-stream',
+    size: Number(meta?.size || 0),
+    folderId: meta?.folderId?.toString?.() || 'inbox',
+    fileIv,
+    starred: meta?.starred === true,
+    description: meta?.description?.toString?.() || '',
+    properties,
+    dateAdded:
+      meta?.dateAdded?.toString?.() || fallbackDate || new Date().toISOString(),
+  };
+}
+
+function normalizeFolderMetadata(meta, fallbackDate) {
+  return {
+    name: meta?.name?.toString?.() || 'Unnamed',
+    parentId: meta?.parentId ?? null,
+    dateAdded:
+      meta?.dateAdded?.toString?.() || fallbackDate || new Date().toISOString(),
+  };
+}
 
 function App() {
-  const [vaultContext, setVaultContext] = useState(null); // { aesKey, authPassword }
+  const [vaultContext, setVaultContext] = useState(null);
   const [currentFolder, setCurrentFolder] = useState('inbox');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  
+
   const [files, setFiles] = useState([]);
   const [folders, setFolders] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -20,19 +65,26 @@ function App() {
   const [isDragActive, setIsDragActive] = useState(false);
   const dragCounterRef = useRef(0);
 
-  // Detail view state: when a file is selected, show its detail page
   const [selectedFile, setSelectedFile] = useState(null);
+  const [recoveryState, setRecoveryState] = useState({
+    needed: false,
+    fileRows: [],
+    folderRows: [],
+    previousPassword: '',
+    isMigrating: false,
+    error: '',
+  });
 
   const handleUnlock = ({ key, password }) => {
     setVaultContext({ aesKey: key, authPassword: password });
   };
 
   const handleUploadSuccess = (newFileRecord) => {
-    setFiles(prev => [newFileRecord, ...prev]);
+    setFiles((prev) => [newFileRecord, ...prev]);
   };
 
   const handleFolderCreateSuccess = (newFolderRecord) => {
-    setFolders(prev => [...prev, newFolderRecord]);
+    setFolders((prev) => [...prev, newFolderRecord]);
   };
 
   const handleUploadFiles = async (selectedFiles, folderId = currentFolder) => {
@@ -43,7 +95,8 @@ function App() {
 
     for (const file of selectedFiles) {
       try {
-        const { encryptedBlob, iv, originalName, originalType, size } = await encryptFile(file, vaultContext.aesKey);
+        const { encryptedBlob, iv, originalName, originalType, size } =
+          await encryptFile(file, vaultContext.aesKey);
 
         const formData = new FormData();
         formData.append('file', encryptedBlob, 'encrypted_blob');
@@ -51,9 +104,9 @@ function App() {
         const uploadRes = await fetch('/api/upload', {
           method: 'POST',
           headers: {
-            'Authorization': `Bearer ${vaultContext.authPassword}`
+            Authorization: `Bearer ${vaultContext.authPassword}`,
           },
-          body: formData
+          body: formData,
         });
 
         if (!uploadRes.ok) throw new Error('Failed to upload file to storage');
@@ -69,27 +122,30 @@ function App() {
           starred: false,
           description: '',
           properties: [],
-          dateAdded: new Date().toISOString()
+          dateAdded: new Date().toISOString(),
         };
 
-        const encryptedMeta = await encryptMetadata(metadataToEncrypt, vaultContext.aesKey);
+        const encryptedMeta = await encryptMetadata(
+          metadataToEncrypt,
+          vaultContext.aesKey,
+        );
         const dbRes = await fetch('/api/files', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${vaultContext.authPassword}`
+            Authorization: `Bearer ${vaultContext.authPassword}`,
           },
           body: JSON.stringify({
             id: blobId,
             encrypted_metadata: encryptedMeta.data,
             metadata_iv: JSON.stringify(encryptedMeta.iv),
-            cloudinary_url
-          })
+            cloudinary_url,
+          }),
         });
 
         if (!dbRes.ok) throw new Error('Failed to save metadata to database');
 
-        const newFileRecord = {
+        uploaded.push({
           id: blobId,
           cloudinary_url,
           originalName,
@@ -100,10 +156,8 @@ function App() {
           starred: false,
           description: '',
           properties: [],
-          dateAdded: metadataToEncrypt.dateAdded
-        };
-
-        uploaded.push(newFileRecord);
+          dateAdded: metadataToEncrypt.dateAdded,
+        });
       } catch (err) {
         console.error('Upload failed for file:', file?.name, err);
         failures.push(file?.name || 'unknown file');
@@ -111,7 +165,7 @@ function App() {
     }
 
     if (uploaded.length) {
-      setFiles(prev => [...uploaded, ...prev]);
+      setFiles((prev) => [...uploaded, ...prev]);
     }
 
     if (failures.length) {
@@ -119,69 +173,237 @@ function App() {
     }
   };
 
-  // Fetch and decrypt files and folders when unlocked
+  const handleRecoverVault = async () => {
+    if (!recoveryState.previousPassword || recoveryState.isMigrating || !vaultContext) {
+      return;
+    }
+
+    setRecoveryState((prev) => ({ ...prev, isMigrating: true, error: '' }));
+
+    try {
+      const { key: oldKey } = await deriveKey(
+        recoveryState.previousPassword,
+        STATIC_SALT,
+      );
+
+      const migratedFiles = [];
+      for (const row of recoveryState.fileRows) {
+        const oldIv = JSON.parse(row.metadata_iv);
+        const oldMeta = await decryptMetadata(row.encrypted_metadata, oldIv, oldKey);
+        const normalizedMeta = normalizeFileMetadata(oldMeta, row.created_at);
+
+        const blobRes = await fetch(row.cloudinary_url);
+        if (!blobRes.ok) {
+          throw new Error(`Failed to fetch encrypted blob for ${row.id}`);
+        }
+        const encryptedBlob = await blobRes.blob();
+        const plainBlob = await decryptFile(
+          encryptedBlob,
+          oldKey,
+          normalizedMeta.fileIv,
+          normalizedMeta.originalType,
+        );
+
+        const fileLike = {
+          arrayBuffer: () => plainBlob.arrayBuffer(),
+          name: normalizedMeta.originalName,
+          type: normalizedMeta.originalType,
+          size: normalizedMeta.size,
+        };
+
+        const reencrypted = await encryptFile(fileLike, vaultContext.aesKey);
+        const nextMeta = {
+          ...normalizedMeta,
+          fileIv: Array.from(reencrypted.iv),
+        };
+        const encryptedMeta = await encryptMetadata(nextMeta, vaultContext.aesKey);
+
+        const formData = new FormData();
+        formData.append('file', reencrypted.encryptedBlob, 'encrypted_blob');
+
+        const uploadRes = await fetch('/api/upload', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${vaultContext.authPassword}`,
+          },
+          body: formData,
+        });
+        if (!uploadRes.ok) {
+          throw new Error('Failed to upload migrated file blob');
+        }
+        const { url: nextCloudinaryUrl } = await uploadRes.json();
+
+        const updateRes = await fetch('/api/files', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${vaultContext.authPassword}`,
+          },
+          body: JSON.stringify({
+            id: row.id,
+            encrypted_metadata: encryptedMeta.data,
+            metadata_iv: JSON.stringify(encryptedMeta.iv),
+            cloudinary_url: nextCloudinaryUrl,
+          }),
+        });
+        if (!updateRes.ok) {
+          throw new Error(`Failed to update migrated file metadata for ${row.id}`);
+        }
+
+        migratedFiles.push({
+          id: row.id,
+          cloudinary_url: nextCloudinaryUrl,
+          ...nextMeta,
+        });
+      }
+
+      const migratedFolders = [];
+      for (const row of recoveryState.folderRows) {
+        const oldIv = JSON.parse(row.metadata_iv);
+        const oldMeta = await decryptMetadata(row.encrypted_metadata, oldIv, oldKey);
+        const nextMeta = normalizeFolderMetadata(oldMeta, row.created_at);
+        const encryptedMeta = await encryptMetadata(nextMeta, vaultContext.aesKey);
+
+        const updateRes = await fetch('/api/folders', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${vaultContext.authPassword}`,
+          },
+          body: JSON.stringify({
+            id: row.id,
+            encrypted_metadata: encryptedMeta.data,
+            metadata_iv: JSON.stringify(encryptedMeta.iv),
+          }),
+        });
+        if (!updateRes.ok) {
+          throw new Error(`Failed to update migrated folder metadata for ${row.id}`);
+        }
+
+        migratedFolders.push({
+          id: row.id,
+          ...nextMeta,
+        });
+      }
+
+      setFiles(migratedFiles);
+      setFolders(migratedFolders);
+      setRecoveryState({
+        needed: false,
+        fileRows: [],
+        folderRows: [],
+        previousPassword: '',
+        isMigrating: false,
+        error: '',
+      });
+      alert(
+        'Vault migration complete. Your files and metadata are now encrypted with the new password.',
+      );
+    } catch (err) {
+      setRecoveryState((prev) => ({
+        ...prev,
+        isMigrating: false,
+        error: err?.message || 'Failed to recover and re-encrypt vault data.',
+      }));
+    }
+  };
+
   useEffect(() => {
     if (!vaultContext) return;
 
     const fetchData = async () => {
       setIsLoading(true);
       try {
-        // Fetch files
         const resFiles = await fetch('/api/files', {
-          headers: { 'Authorization': `Bearer ${vaultContext.authPassword}` }
+          headers: { Authorization: `Bearer ${vaultContext.authPassword}` },
         });
         if (!resFiles.ok) throw new Error('Failed to fetch files');
         const fileData = await resFiles.json();
 
-        // Decrypt files
-        const decryptedFiles = await Promise.all(fileData.map(async (row) => {
-          try {
-            const ivArray = JSON.parse(row.metadata_iv);
-            const meta = await decryptMetadata(row.encrypted_metadata, ivArray, vaultContext.aesKey);
-            return {
-              id: row.id,
-              cloudinary_url: row.cloudinary_url,
-              originalName: meta.originalName,
-              originalType: meta.originalType,
-              size: meta.size,
-              folderId: meta.folderId,
-              fileIv: meta.fileIv,
-              starred: meta.starred || false,
-              description: meta.description || '',
-              properties: meta.properties || [],
-              dateAdded: meta.dateAdded || row.created_at
-            };
-          } catch (e) {
-            console.error('Failed to decrypt file', row.id, e);
-            return null;
-          }
-        }));
-        setFiles(decryptedFiles.filter(Boolean));
+        let failedFiles = 0;
+        const decryptedFiles = await Promise.all(
+          fileData.map(async (row) => {
+            try {
+              const ivArray = JSON.parse(row.metadata_iv);
+              const meta = await decryptMetadata(
+                row.encrypted_metadata,
+                ivArray,
+                vaultContext.aesKey,
+              );
+              const normalized = normalizeFileMetadata(meta, row.created_at);
+              return {
+                id: row.id,
+                cloudinary_url: row.cloudinary_url,
+                ...normalized,
+              };
+            } catch (e) {
+              console.error('Failed to decrypt file', row.id, e);
+              failedFiles += 1;
+              return null;
+            }
+          }),
+        );
+        const validFiles = decryptedFiles.filter(Boolean);
 
-        // Fetch folders
         const resFolders = await fetch('/api/folders', {
-          headers: { 'Authorization': `Bearer ${vaultContext.authPassword}` }
+          headers: { Authorization: `Bearer ${vaultContext.authPassword}` },
         });
         if (resFolders.ok) {
           const folderData = await resFolders.json();
-          const decryptedFolders = await Promise.all(folderData.map(async (row) => {
-            try {
-              const ivArray = JSON.parse(row.metadata_iv);
-              const meta = await decryptMetadata(row.encrypted_metadata, ivArray, vaultContext.aesKey);
-              return {
-                id: row.id,
-                name: meta.name,
-                parentId: meta.parentId || null,
-                dateAdded: meta.dateAdded || row.created_at
-              };
-            } catch (e) {
-              console.error('Failed to decrypt folder', row.id, e);
-              return null;
-            }
-          }));
-          setFolders(decryptedFolders.filter(Boolean));
-        }
+          let failedFolders = 0;
+          const decryptedFolders = await Promise.all(
+            folderData.map(async (row) => {
+              try {
+                const ivArray = JSON.parse(row.metadata_iv);
+                const meta = await decryptMetadata(
+                  row.encrypted_metadata,
+                  ivArray,
+                  vaultContext.aesKey,
+                );
+                return {
+                  id: row.id,
+                  ...normalizeFolderMetadata(meta, row.created_at),
+                };
+              } catch (e) {
+                console.error('Failed to decrypt folder', row.id, e);
+                failedFolders += 1;
+                return null;
+              }
+            }),
+          );
+          const validFolders = decryptedFolders.filter(Boolean);
 
+          const totalRows = fileData.length + folderData.length;
+          const totalDecrypted = validFiles.length + validFolders.length;
+          const totalFailed = failedFiles + failedFolders;
+
+          if (totalRows > 0 && totalDecrypted === 0 && totalFailed > 0) {
+            setFiles([]);
+            setFolders([]);
+            setRecoveryState({
+              needed: true,
+              fileRows: fileData,
+              folderRows: folderData,
+              previousPassword: '',
+              isMigrating: false,
+              error: '',
+            });
+          } else {
+            setFiles(validFiles);
+            setFolders(validFolders);
+            setRecoveryState((prev) => ({
+              ...prev,
+              needed: false,
+              fileRows: [],
+              folderRows: [],
+              previousPassword: '',
+              isMigrating: false,
+              error: '',
+            }));
+          }
+        } else {
+          setFiles(validFiles);
+        }
       } catch (err) {
         console.error(err);
       } finally {
@@ -193,7 +415,7 @@ function App() {
   }, [vaultContext]);
 
   useEffect(() => {
-    if (!vaultContext) return;
+    if (!vaultContext || recoveryState.needed) return;
 
     const hasFiles = (event) => {
       const types = event.dataTransfer?.types;
@@ -242,17 +464,14 @@ function App() {
       window.removeEventListener('dragleave', onDragLeave);
       window.removeEventListener('drop', onDrop);
     };
-  }, [vaultContext, currentFolder]);
+  }, [vaultContext, currentFolder, recoveryState.needed]);
 
-  // If the vault is locked, show the unlock screen
   if (!vaultContext) {
     return <MasterPassword onUnlock={handleUnlock} />;
   }
 
-  // Update files in state after a move/rename/star/edit
   const handleFileUpdate = (updatedFile) => {
-    setFiles(prev => prev.map(f => f.id === updatedFile.id ? updatedFile : f));
-    // If the detail view is open for this file, update it too
+    setFiles((prev) => prev.map((f) => (f.id === updatedFile.id ? updatedFile : f)));
     if (selectedFile && selectedFile.id === updatedFile.id) {
       setSelectedFile(updatedFile);
     }
@@ -276,21 +495,78 @@ function App() {
         <Menu size={20} />
       </button>
 
-      {isSidebarOpen && <button className={styles.mobileSidebarBackdrop} onClick={() => setIsSidebarOpen(false)} aria-label="Close folders" />}
+      {isSidebarOpen && (
+        <button
+          className={styles.mobileSidebarBackdrop}
+          onClick={() => setIsSidebarOpen(false)}
+          aria-label="Close folders"
+        />
+      )}
 
-      <Sidebar 
-        currentFolder={currentFolder} 
-        onSelectFolder={(folderId) => { setCurrentFolder(folderId); setSelectedFile(null); setIsSidebarOpen(false); }} 
+      <Sidebar
+        currentFolder={currentFolder}
+        onSelectFolder={(folderId) => {
+          setCurrentFolder(folderId);
+          setSelectedFile(null);
+          setIsSidebarOpen(false);
+        }}
         customFolders={folders}
         vaultContext={vaultContext}
         onFolderCreateSuccess={handleFolderCreateSuccess}
         isMobileOpen={isSidebarOpen}
         onCloseMobile={() => setIsSidebarOpen(false)}
       />
-      
+
       <main className={styles.mainContent}>
         {isLoading ? (
-          <div style={{ padding: '32px', color: 'var(--text-secondary)', fontSize: 'var(--text-subheadline)' }}>Decrypting vault...</div>
+          <div
+            style={{
+              padding: '32px',
+              color: 'var(--text-secondary)',
+              fontSize: 'var(--text-subheadline)',
+            }}
+          >
+            Decrypting vault...
+          </div>
+        ) : recoveryState.needed ? (
+          <div className={styles.recoveryWrap}>
+            <div className={styles.recoveryCard}>
+              <h2 className={styles.recoveryTitle}>Vault Re-encryption Required</h2>
+              <p className={styles.recoveryText}>
+                Your files appear to be encrypted with a previous password. Enter
+                the old decryption password to migrate all file blobs and metadata
+                to your current password.
+              </p>
+              <input
+                type="password"
+                className={styles.recoveryInput}
+                placeholder="Previous decryption password"
+                value={recoveryState.previousPassword}
+                onChange={(e) =>
+                  setRecoveryState((prev) => ({
+                    ...prev,
+                    previousPassword: e.target.value,
+                    error: '',
+                  }))
+                }
+                disabled={recoveryState.isMigrating}
+              />
+              {recoveryState.error && (
+                <p className={styles.recoveryError}>{recoveryState.error}</p>
+              )}
+              <button
+                className={styles.recoveryButton}
+                onClick={handleRecoverVault}
+                disabled={
+                  recoveryState.isMigrating || !recoveryState.previousPassword
+                }
+              >
+                {recoveryState.isMigrating
+                  ? 'Re-encrypting Vault...'
+                  : 'Recover and Re-encrypt Vault'}
+              </button>
+            </div>
+          </div>
         ) : selectedFile ? (
           <FileDetailView
             file={selectedFile}
@@ -301,9 +577,9 @@ function App() {
             aesKey={vaultContext.aesKey}
           />
         ) : (
-          <FileList 
-            files={files} 
-            aesKey={vaultContext.aesKey} 
+          <FileList
+            files={files}
+            aesKey={vaultContext.aesKey}
             currentFolder={currentFolder}
             vaultContext={vaultContext}
             customFolders={folders}
@@ -312,10 +588,10 @@ function App() {
             onSelectFile={handleSelectFile}
           />
         )}
-        
-        {!selectedFile && (
-          <button 
-            className={styles.fab} 
+
+        {!selectedFile && !recoveryState.needed && (
+          <button
+            className={styles.fab}
             onClick={() => setIsUploadModalOpen(true)}
             title="Add File"
           >
@@ -324,9 +600,9 @@ function App() {
         )}
       </main>
 
-      <UploadModal 
-        isOpen={isUploadModalOpen} 
-        onClose={() => setIsUploadModalOpen(false)} 
+      <UploadModal
+        isOpen={isUploadModalOpen}
+        onClose={() => setIsUploadModalOpen(false)}
         vaultContext={vaultContext}
         currentFolder={currentFolder}
         customFolders={folders}
@@ -337,8 +613,12 @@ function App() {
       {isDragActive && (
         <div className={styles.globalDropOverlay}>
           <div className={styles.globalDropCard}>
-            <span className={styles.globalDropTitle}>Drop to Encrypt and Upload</span>
-            <span className={styles.globalDropSubtitle}>Files are encrypted locally before upload.</span>
+            <span className={styles.globalDropTitle}>
+              Drop to Encrypt and Upload
+            </span>
+            <span className={styles.globalDropSubtitle}>
+              Files are encrypted locally before upload.
+            </span>
           </div>
         </div>
       )}

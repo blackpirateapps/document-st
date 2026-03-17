@@ -24,18 +24,23 @@ Both clients implement identical encryption: same AES-GCM 256-bit, same PBKDF2 k
 1. **Master Password:** The user enters a master password on the client (web or mobile).
 2. **Authentication:** The client sends the raw password as a Bearer token to `/api/files` and `/api/folders` to authenticate.
 3. **Key Derivation:** Locally, the client derives a 256-bit AES-GCM key from the master password using PBKDF2 (100,000 iterations, SHA-256) with a **static salt**: `[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]`. **CRITICAL:** Both clients must use this exact salt or derived keys will differ and cross-client decryption will fail.
-4. **File Encryption (Upload):**
+4. **Password Rotation Recovery (Web + Mobile):** If API auth succeeds but all encrypted records fail decryption, the app treats it as a key mismatch (typically caused by rotating `MASTER_PASSWORD`). It prompts for the *previous* decryption password, decrypts file/folder metadata and file blobs locally, then re-encrypts everything with the current key and updates server records.
+5. **File Encryption (Upload):**
    - The selected `File` object is converted to an `ArrayBuffer` and encrypted locally via `crypto.subtle.encrypt` (AES-GCM).
    - The *encrypted blob* is sent to the Vercel API (`/api/upload`) and stored directly in Cloudinary. Cloudinary only sees random bytes.
-5. **Metadata & Folder Encryption:**
+6. **Metadata & Folder Encryption:**
    - Sensitive metadata (original filename, file type, file size, folder location, starred status, description, custom properties, and the IV used to encrypt the blob) is bundled into a JSON object.
    - This JSON object is encrypted locally using the same AES key.
    - The *encrypted metadata string* (Base64) and the Cloudinary URL are sent to Turso DB (`/api/files`). Folder names and parent IDs are similarly encrypted and sent to `folders` table.
-6. **Decryption (Download/View):**
+7. **Decryption (Download/View):**
    - The frontend fetches all encrypted metadata records from Turso.
    - It decrypts the metadata locally using the key in memory to restore the file and folder lists.
    - When a user clicks "Download", the app fetches the encrypted blob from Cloudinary, decrypts it locally using the AES key and the specific IV stored in the decrypted metadata, and triggers a local browser download via `URL.createObjectURL`.
-   - **PDF Previews:** For PDFs, the blob is decrypted into memory and fed to an iframe via an Object URL, enabling secure, local previewing.
+    - **PDF Previews:** For PDFs, the blob is decrypted into memory and fed to an iframe via an Object URL, enabling secure, local previewing.
+
+### Recovery/Re-Encryption API Support
+- `PUT /api/files` now accepts optional `cloudinary_url` so migration can replace both encrypted metadata and encrypted blob location in one update.
+- `PUT /api/folders` is now implemented so folder metadata can be re-encrypted during password-rotation recovery.
 
 ## Encrypted Metadata Schema
 
@@ -122,6 +127,7 @@ All design tokens are defined in `src/index.css` `:root`. Components reference C
 
 ### Source Components
 - `src/App.jsx` — Root component. Manages vault state, folder navigation, file/folder decryption, selected file state for detail view. Hides FAB when detail view is open.
+- `src/App.jsx` — Also contains the web vault recovery UI/workflow: detects decryption mismatch after successful auth, prompts for previous password, then re-encrypts all file blobs + metadata and folder metadata.
 - `src/components/MasterPassword.jsx` — Unlock screen with master password input and key derivation.
 - `src/components/Sidebar.jsx` — Navigation sidebar with default folders, recursive `FolderTreeItem` for custom folder hierarchy, expand/collapse, subfolder creation.
 - `src/components/FileList.jsx` — File table with star toggle, click-to-open (PDF -> preview, others -> detail), context menu (preview, details, rename, move, copy, trash), download.
@@ -145,8 +151,8 @@ All design tokens are defined in `src/index.css` `:root`. Components reference C
 
 ### Server API (Vercel Serverless)
 - `api/upload.js` — Parses encrypted file upload via `formidable` and pushes to Cloudinary.
-- `api/files.js` — Turso DB CRUD for file records (GET, POST, PUT, DELETE).
-- `api/folders.js` — Turso DB CRUD for folder records (GET, POST, DELETE). **Note: No PUT method exists** — folder editing/renaming would require adding this.
+- `api/files.js` — Turso DB endpoints for file records (GET, POST, PUT). `PUT` supports optional `cloudinary_url` updates for migration.
+- `api/folders.js` — Turso DB endpoints for folder records (GET, POST, PUT).
 
 ## Environment Variables Required (Vercel)
 - `MASTER_PASSWORD`: Used to authenticate API requests.
@@ -170,7 +176,7 @@ The app has no client-side router. Navigation is state-driven:
 - **Dependencies:** Always check package usage before adding new ones. Standardize on `lucide-react` for icons.
 - **Metadata Evolution:** When adding new fields to the encrypted metadata JSON, always provide fallback defaults during decryption to maintain backward compatibility with existing records.
 - **Shared Modal Styles:** All modals import from `UploadModal.module.css`. Add new modal styles there, not in separate files.
-- **Folder API Gap:** `api/folders.js` has no PUT endpoint. If folder renaming or editing is needed, that endpoint must be added first.
+- **Password Rotation Migration:** If auth password changes and decryption fails, use the built-in recovery flow to migrate all metadata + blobs to the new key instead of treating vault data as lost.
 
 ---
 
@@ -252,17 +258,17 @@ HTTP client targeting `https://document-st.vercel.app`:
 - `fetchFiles(password)` — `GET /api/files` returns all encrypted file records.
 - `fetchFolders(password)` — `GET /api/folders` returns all encrypted folder records.
 - `createFile(...)` — `POST /api/files` with encrypted metadata + Cloudinary URL.
-- `updateFile(...)` — `PUT /api/files` with updated encrypted metadata.
-- `deleteFile(...)` — `DELETE /api/files`.
+- `updateFile(...)` — `PUT /api/files` with updated encrypted metadata (and optional migrated `cloudinary_url`).
 - `createFolder(...)` — `POST /api/folders`.
-- `deleteFolder(...)` — `DELETE /api/folders`.
+- `updateFolder(...)` — `PUT /api/folders` with updated encrypted folder metadata.
 - `uploadEncryptedFile(...)` — Multipart `POST /api/upload` with encrypted bytes.
 - `fetchRawFile(url)` — `GET` the encrypted blob from Cloudinary.
 
 #### `lib/services/vault_provider.dart`
 ChangeNotifier that manages all app state:
 - Holds `_keyBytes`, `_password`, `_files`, `_folders`, `_currentFolderId`, `_selectedFile`, `_sidebarOpen`, `_uploadQueue`.
-- `unlock(password)` — authenticates, derives key. Loads cached vault data from `shared_preferences` first for instant unlock, then syncs from server in background.
+- `unlock(password)` — authenticates and derives key; if server auth passes but decryption fails for all rows, returns a recovery-required state instead of unlocking.
+- `recoverVaultWithPreviousPassword(previousPassword)` — decrypts all server rows with old key, re-encrypts with current key, uploads new encrypted blobs, updates file and folder records, and refreshes local cache.
 - CRUD operations: `uploadFile`, `uploadFiles` (batch), `renameFile`, `moveFile`, `copyFile`, `trashFile`, `toggleStar`, `createFolder`, `deleteFolder`.
 - All mutations re-encrypt metadata and PUT/POST to the API, then call `_saveToCache()` to persist locally.
 - **Offline caching:** Uses `shared_preferences` with keys `vault_cached_files`, `vault_cached_folders`, `vault_cache_ts`. Decrypted vault data is cached as JSON after every mutation.
@@ -286,6 +292,8 @@ Main layout with responsive behavior:
 - **Note:** `flutter analyze` and `flutter test` have `continue-on-error: true` to not block APK builds during initial development.
 
 ### Known Issues & Future Work
+- **Password rotation recovery implemented (Mar 2026):** Both web and Flutter now detect all-row decryption failure after successful auth and prompt for the previous decryption password to migrate data.
+- **Migration write-paths expanded (Mar 2026):** Added `PUT /api/folders` and optional `cloudinary_url` updates in `PUT /api/files` to support full blob + metadata re-encryption.
 - **Release build breakage fixed (Mar 2026):** `CupertinoIcons.key_fill` is not available in Flutter 3.24, so `mobile/lib/screens/file_detail_screen.dart` now uses `CupertinoIcons.key` in the Encryption section to keep `assembleRelease` compiling.
 - **CI Android toolchain finding resolved:** Plugins now require NDK `26.1.10909125`; app config pins this NDK version explicitly in `android/app/build.gradle`.
 - **CI resource linking finding resolved:** Missing launcher icon resource (`@mipmap/ic_launcher`) was added via XML drawable resources under `android/app/src/main/res/`.

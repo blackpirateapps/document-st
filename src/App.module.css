@@ -61,6 +61,81 @@
   color: var(--text-secondary);
 }
 
+.recoveryWrap {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.recoveryCard {
+  width: min(560px, 92vw);
+  background: var(--vibrancy-thick);
+  border: 0.5px solid var(--border-color);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.recoveryTitle {
+  margin: 0;
+  font-size: var(--text-title3);
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+}
+
+.recoveryText {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-subheadline);
+  line-height: 1.4;
+}
+
+.recoveryInput {
+  width: 100%;
+  background: var(--fill-quaternary);
+  border: 0.5px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 11px 14px;
+  border-radius: var(--radius-md);
+  font-size: var(--text-subheadline);
+}
+
+.recoveryInput:focus {
+  border-color: var(--border-focused);
+  box-shadow: 0 0 0 3px var(--accent-blue-dim);
+}
+
+.recoveryError {
+  margin: 0;
+  color: var(--danger-red);
+  font-size: var(--text-footnote);
+}
+
+.recoveryButton {
+  width: 100%;
+  background: var(--accent-blue);
+  color: #fff;
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: var(--text-subheadline);
+  font-weight: 600;
+  transition: all var(--duration-fast) var(--ease-default);
+}
+
+.recoveryButton:hover:not(:disabled) {
+  background: var(--accent-blue-hover);
+}
+
+.recoveryButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ── Floating Action Button (Apple-style) ── */
 .fab {
   position: absolute;

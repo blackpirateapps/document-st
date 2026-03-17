@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
@@ -24,6 +25,22 @@ class UploadTask {
   });
 }
 
+enum UnlockStatus { success, invalidPassword, needsRecovery, failure }
+
+class UnlockResult {
+  final UnlockStatus status;
+  final String? message;
+
+  const UnlockResult(this.status, {this.message});
+}
+
+class RecoveryResult {
+  final bool success;
+  final String message;
+
+  const RecoveryResult({required this.success, required this.message});
+}
+
 /// Central state manager for the vault.
 class VaultProvider extends ChangeNotifier {
   ApiService? _api;
@@ -39,9 +56,12 @@ class VaultProvider extends ChangeNotifier {
   List<VaultFile> _files = [];
   List<VaultFolder> _folders = [];
   List<UploadTask> _uploadQueue = [];
+  bool _needsRecovery = false;
+  List<Map<String, dynamic>> _recoveryFileRows = [];
+  List<Map<String, dynamic>> _recoveryFolderRows = [];
 
   // Getters
-  bool get isUnlocked => _keyBytes != null;
+  bool get isUnlocked => _keyBytes != null && !_needsRecovery;
   bool get isLoading => _isLoading;
   String? get error => _error;
   String get currentFolder => _currentFolder;
@@ -52,6 +72,9 @@ class VaultProvider extends ChangeNotifier {
   String? get authPassword => _authPassword;
   bool get sidebarOpen => _sidebarOpen;
   List<UploadTask> get uploadQueue => List.unmodifiable(_uploadQueue);
+  bool get needsRecovery => _needsRecovery;
+  int get recoveryItemsCount =>
+      _recoveryFileRows.length + _recoveryFolderRows.length;
   bool get hasActiveUploads =>
       _uploadQueue.any((t) => t.status != 'done' && t.status != 'error');
 
@@ -85,29 +108,54 @@ class VaultProvider extends ChangeNotifier {
   }
 
   /// Unlock vault with master password.
-  Future<bool> unlock(String password) async {
+  Future<UnlockResult> unlock(String password) async {
     try {
       _isLoading = true;
       _error = null;
+      _needsRecovery = false;
+      _recoveryFileRows = [];
+      _recoveryFolderRows = [];
       notifyListeners();
 
       _keyBytes = CryptoService.deriveKeyBytes(password);
       _authPassword = password;
       _api = ApiService(authPassword: password);
 
-      // Try loading from cache first for instant unlock
-      final cached = await _loadFromCache();
-      if (cached) {
-        _isLoading = false;
-        notifyListeners();
-        // Then sync from server in background
-        _fetchData(silent: true);
-        return true;
+      try {
+        await _fetchData(rethrowOnError: true);
+      } catch (e) {
+        if (e.toString().contains('401')) {
+          _keyBytes = null;
+          _authPassword = null;
+          _api = null;
+          _isLoading = false;
+          notifyListeners();
+          return const UnlockResult(
+            UnlockStatus.invalidPassword,
+            message: 'Invalid master password.',
+          );
+        }
+
+        final cached = await _loadFromCache();
+        if (cached) {
+          _isLoading = false;
+          _error = 'Using offline cache. Unable to reach server.';
+          notifyListeners();
+          _fetchData(silent: true);
+          return const UnlockResult(UnlockStatus.success);
+        }
+        rethrow;
       }
 
-      // No cache — fetch from server
-      await _fetchData();
-      return true;
+      if (_needsRecovery) {
+        return const UnlockResult(
+          UnlockStatus.needsRecovery,
+          message:
+              'Your vault was encrypted with a different password. Enter the previous decryption password to migrate data.',
+        );
+      }
+
+      return const UnlockResult(UnlockStatus.success);
     } catch (e) {
       _keyBytes = null;
       _authPassword = null;
@@ -115,7 +163,7 @@ class VaultProvider extends ChangeNotifier {
       _error = 'Failed to unlock vault. Check your password.';
       _isLoading = false;
       notifyListeners();
-      return false;
+      return const UnlockResult(UnlockStatus.failure);
     }
   }
 
@@ -204,7 +252,10 @@ class VaultProvider extends ChangeNotifier {
 
   // ── Data Fetching ──
 
-  Future<void> _fetchData({bool silent = false}) async {
+  Future<void> _fetchData({
+    bool silent = false,
+    bool rethrowOnError = false,
+  }) async {
     if (!silent) {
       _isLoading = true;
       notifyListeners();
@@ -239,7 +290,6 @@ class VaultProvider extends ChangeNotifier {
           debugPrint('Failed to decrypt file ${row['id']}: $e');
         }
       }
-      _files = decrypted;
 
       // Fetch and decrypt folders
       final rawFolders = await _api!.fetchFolders();
@@ -268,6 +318,24 @@ class VaultProvider extends ChangeNotifier {
           debugPrint('Failed to decrypt folder ${row['id']}: $e');
         }
       }
+
+      final totalRows = rawFiles.length + rawFolders.length;
+      final totalDecrypted = decrypted.length + decryptedFolders.length;
+      if (totalRows > 0 && totalDecrypted == 0) {
+        _needsRecovery = true;
+        _recoveryFileRows = rawFiles;
+        _recoveryFolderRows = rawFolders;
+        _files = [];
+        _folders = [];
+        _error =
+            'Vault data is encrypted with a different password. Migration required.';
+        return;
+      }
+
+      _needsRecovery = false;
+      _recoveryFileRows = [];
+      _recoveryFolderRows = [];
+      _files = decrypted;
       _folders = decryptedFolders;
 
       _error = null;
@@ -278,6 +346,9 @@ class VaultProvider extends ChangeNotifier {
       if (!silent) {
         _error = 'Failed to load vault data: $e';
       }
+      if (rethrowOnError) {
+        rethrow;
+      }
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -286,6 +357,206 @@ class VaultProvider extends ChangeNotifier {
 
   /// Refresh data from server.
   Future<void> refresh() => _fetchData();
+
+  Future<RecoveryResult> recoverVaultWithPreviousPassword(
+    String previousPassword,
+  ) async {
+    if (_api == null || _keyBytes == null || !_needsRecovery) {
+      return const RecoveryResult(
+        success: false,
+        message: 'No recovery operation is currently required.',
+      );
+    }
+
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      final oldKeyBytes = CryptoService.deriveKeyBytes(previousPassword);
+
+      final fileRows = List<Map<String, dynamic>>.from(_recoveryFileRows);
+      final folderRows = List<Map<String, dynamic>>.from(_recoveryFolderRows);
+
+      final decryptedFileMeta = <Map<String, dynamic>>[];
+      for (final row in fileRows) {
+        try {
+          final ivList = _parseIvList(row['metadata_iv']);
+          final meta = CryptoService.decryptMetadata(
+            row['encrypted_metadata'] as String,
+            ivList,
+            oldKeyBytes,
+          );
+          decryptedFileMeta.add(_normalizeFileMeta(meta, row['created_at']));
+        } catch (_) {
+          return const RecoveryResult(
+            success: false,
+            message: 'Previous decryption password is incorrect.',
+          );
+        }
+      }
+
+      final decryptedFolderMeta = <Map<String, dynamic>>[];
+      for (final row in folderRows) {
+        try {
+          final ivList = _parseIvList(row['metadata_iv']);
+          final meta = CryptoService.decryptMetadata(
+            row['encrypted_metadata'] as String,
+            ivList,
+            oldKeyBytes,
+          );
+          decryptedFolderMeta.add(
+            _normalizeFolderMeta(meta, row['created_at']),
+          );
+        } catch (_) {
+          return const RecoveryResult(
+            success: false,
+            message: 'Previous decryption password is incorrect.',
+          );
+        }
+      }
+
+      final migratedFiles = <VaultFile>[];
+      for (var i = 0; i < fileRows.length; i++) {
+        final row = fileRows[i];
+        final meta = decryptedFileMeta[i];
+
+        final encryptedBlob = await _api!.fetchRawBytes(
+          row['cloudinary_url'] as String,
+        );
+        final plainBytes = CryptoService.decryptFileBytes(
+          encryptedBlob,
+          oldKeyBytes,
+          (meta['fileIv'] as List<dynamic>)
+              .map<int>((e) => (e as num).toInt())
+              .toList(),
+        );
+
+        final reencryptedBlob = CryptoService.encryptFileBytes(
+          plainBytes,
+          _keyBytes!,
+        );
+        final newEncryptedBytes =
+            reencryptedBlob['encryptedBytes'] as Uint8List;
+        final newFileIv = reencryptedBlob['iv'] as Uint8List;
+
+        meta['fileIv'] = newFileIv.toList();
+        final encryptedMeta = CryptoService.encryptMetadata(meta, _keyBytes!);
+        final newCloudinaryUrl = await _api!.uploadEncryptedBlob(
+          newEncryptedBytes,
+        );
+
+        await _api!.updateFile(
+          id: row['id'] as String,
+          encryptedMetadata: encryptedMeta['data'] as String,
+          metadataIv: jsonEncode(encryptedMeta['iv']),
+          cloudinaryUrl: newCloudinaryUrl,
+        );
+
+        migratedFiles.add(
+          VaultFile.fromDecryptedMeta(
+            id: row['id'] as String,
+            cloudinaryUrl: newCloudinaryUrl,
+            meta: meta,
+            fallbackDate:
+                row['created_at']?.toString() ??
+                DateTime.now().toIso8601String(),
+          ),
+        );
+      }
+
+      final migratedFolders = <VaultFolder>[];
+      for (var i = 0; i < folderRows.length; i++) {
+        final row = folderRows[i];
+        final meta = decryptedFolderMeta[i];
+        final encryptedMeta = CryptoService.encryptMetadata(meta, _keyBytes!);
+        await _api!.updateFolder(
+          id: row['id'] as String,
+          encryptedMetadata: encryptedMeta['data'] as String,
+          metadataIv: jsonEncode(encryptedMeta['iv']),
+        );
+
+        migratedFolders.add(
+          VaultFolder.fromDecryptedMeta(
+            id: row['id'] as String,
+            meta: meta,
+            fallbackDate:
+                row['created_at']?.toString() ??
+                DateTime.now().toIso8601String(),
+          ),
+        );
+      }
+
+      _files = migratedFiles;
+      _folders = migratedFolders;
+      _selectedFile = null;
+      _currentFolder = 'inbox';
+      _needsRecovery = false;
+      _recoveryFileRows = [];
+      _recoveryFolderRows = [];
+      _error = null;
+      await _saveToCache();
+
+      return const RecoveryResult(
+        success: true,
+        message: 'Vault re-encryption complete.',
+      );
+    } catch (e) {
+      return RecoveryResult(success: false, message: 'Recovery failed: $e');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  List<int> _parseIvList(dynamic rawIv) {
+    final decoded = jsonDecode(rawIv as String) as List<dynamic>;
+    return decoded.map<int>((e) => (e as num).toInt()).toList();
+  }
+
+  Map<String, dynamic> _normalizeFileMeta(
+    Map<String, dynamic> meta,
+    dynamic createdAt,
+  ) {
+    final fileIv = (meta['fileIv'] as List<dynamic>?) ?? const [];
+    return {
+      'originalName': meta['originalName']?.toString() ?? 'Unknown',
+      'originalType':
+          meta['originalType']?.toString() ?? 'application/octet-stream',
+      'size': (meta['size'] as num?)?.toInt() ?? 0,
+      'folderId': meta['folderId']?.toString() ?? 'inbox',
+      'fileIv': fileIv.map<int>((e) => (e as num).toInt()).toList(),
+      'starred': meta['starred'] == true,
+      'description': meta['description']?.toString() ?? '',
+      'properties': ((meta['properties'] as List<dynamic>?) ?? const [])
+          .map<Map<String, String>>((p) {
+            final m = p as Map<String, dynamic>;
+            return {
+              'key': m['key']?.toString() ?? '',
+              'value': m['value']?.toString() ?? '',
+            };
+          })
+          .toList(),
+      'dateAdded':
+          meta['dateAdded']?.toString() ??
+          createdAt?.toString() ??
+          DateTime.now().toIso8601String(),
+    };
+  }
+
+  Map<String, dynamic> _normalizeFolderMeta(
+    Map<String, dynamic> meta,
+    dynamic createdAt,
+  ) {
+    return {
+      'name': meta['name']?.toString() ?? 'Unnamed',
+      'parentId': meta['parentId'],
+      'dateAdded':
+          meta['dateAdded']?.toString() ??
+          createdAt?.toString() ??
+          DateTime.now().toIso8601String(),
+    };
+  }
 
   void setCurrentFolder(String folderId) {
     _currentFolder = folderId;
@@ -582,12 +853,16 @@ class VaultProvider extends ChangeNotifier {
     _keyBytes = null;
     _authPassword = null;
     _api = null;
+    _error = null;
     _files = [];
     _folders = [];
     _selectedFile = null;
     _currentFolder = 'inbox';
     _uploadQueue = [];
     _sidebarOpen = false;
+    _needsRecovery = false;
+    _recoveryFileRows = [];
+    _recoveryFolderRows = [];
     notifyListeners();
   }
 }

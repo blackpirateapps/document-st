@@ -43,6 +43,21 @@ export default async function handler(req, res) {
       return res.status(201).json({ success: true });
     }
 
+    if (req.method === 'PUT') {
+      const { id, encrypted_metadata, metadata_iv } = req.body;
+
+      if (!id || !encrypted_metadata || !metadata_iv) {
+        return res.status(400).json({ error: 'Missing required fields' });
+      }
+
+      await db.execute({
+        sql: 'UPDATE folders SET encrypted_metadata = ?, metadata_iv = ? WHERE id = ?',
+        args: [encrypted_metadata, metadata_iv, id]
+      });
+
+      return res.status(200).json({ success: true });
+    }
+
     res.status(405).json({ error: 'Method Not Allowed' });
   } catch (error) {
     console.error('Database error:', error);

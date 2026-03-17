@@ -45,16 +45,23 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PUT') {
-      const { id, encrypted_metadata, metadata_iv } = req.body;
+      const { id, encrypted_metadata, metadata_iv, cloudinary_url } = req.body;
       
       if (!id || !encrypted_metadata || !metadata_iv) {
         return res.status(400).json({ error: 'Missing required fields' });
       }
 
-      await db.execute({
-        sql: 'UPDATE files SET encrypted_metadata = ?, metadata_iv = ? WHERE id = ?',
-        args: [encrypted_metadata, metadata_iv, id]
-      });
+      if (cloudinary_url) {
+        await db.execute({
+          sql: 'UPDATE files SET encrypted_metadata = ?, metadata_iv = ?, cloudinary_url = ? WHERE id = ?',
+          args: [encrypted_metadata, metadata_iv, cloudinary_url, id]
+        });
+      } else {
+        await db.execute({
+          sql: 'UPDATE files SET encrypted_metadata = ?, metadata_iv = ? WHERE id = ?',
+          args: [encrypted_metadata, metadata_iv, id]
+        });
+      }
 
       return res.status(200).json({ success: true });
     }
