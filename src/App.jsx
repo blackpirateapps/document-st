@@ -109,7 +109,7 @@ function normalizeFolderMetadata(meta, fallbackDate) {
 
 function App() {
   const [vaultContext, setVaultContext] = useState(null);
-  const [currentFolder, setCurrentFolder] = useState('inbox');
+  const [currentFolder, setCurrentFolder] = useState('all');
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
 
   const [files, setFiles] = useState([]);

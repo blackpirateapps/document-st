@@ -186,12 +186,16 @@ export default function FileList({ files, aesKey, currentFolder, vaultContext, c
   };
 
   // Filter files: "starred" folder shows all starred files, otherwise filter by folderId
-  const folderFiles = currentFolder === 'starred'
-    ? files.filter(f => f.starred && f.folderId !== 'trash')
-    : files.filter(f => f.folderId === currentFolder);
+  const folderFiles = currentFolder === 'all'
+    ? files.filter(f => f.folderId !== 'trash')
+    : currentFolder === 'starred'
+      ? files.filter(f => f.starred && f.folderId !== 'trash')
+      : files.filter(f => f.folderId === currentFolder);
   
   // Find custom folder name if it's a custom folder
-  let folderTitle = currentFolder.charAt(0).toUpperCase() + currentFolder.slice(1);
+  let folderTitle = currentFolder === 'all'
+    ? 'All Files'
+    : currentFolder.charAt(0).toUpperCase() + currentFolder.slice(1);
   const customFolder = customFolders?.find(f => f.id === currentFolder);
   if (customFolder) folderTitle = customFolder.name;
 
@@ -207,7 +211,11 @@ export default function FileList({ files, aesKey, currentFolder, vaultContext, c
             <FolderEmptyIcon />
           </div>
           <p className={styles.emptyText}>
-            {currentFolder === 'starred' ? 'No starred files.' : 'No files in this folder.'}
+            {currentFolder === 'starred'
+              ? 'No starred files.'
+              : currentFolder === 'all'
+                ? 'No decrypted files available.'
+                : 'No files in this folder.'}
           </p>
         </div>
       ) : (

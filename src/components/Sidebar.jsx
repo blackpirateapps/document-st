@@ -1,4 +1,4 @@
-import { Folder, ChevronRight, Inbox, Star, Settings, Trash2, Plus, X } from 'lucide-react';
+import { Folder, ChevronRight, Inbox, Star, Settings, Trash2, Plus, X, Files } from 'lucide-react';
 import styles from './Sidebar.module.css';
 import clsx from 'clsx';
 import { useState } from 'react';
@@ -61,6 +61,7 @@ export default function Sidebar({ currentFolder, onSelectFolder, onOpenSettings,
   const [folderModalState, setFolderModalState] = useState({ isOpen: false, parentId: null });
 
   const defaultFolders = [
+    { id: 'all', label: 'All Files', icon: Files },
     { id: 'inbox', label: 'Inbox', icon: Inbox },
     { id: 'starred', label: 'Starred', icon: Star },
     { id: 'documents', label: 'Documents', icon: Folder },

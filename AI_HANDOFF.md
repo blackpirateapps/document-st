@@ -128,6 +128,7 @@ All design tokens are defined in `src/index.css` `:root`. Components reference C
 ### Source Components
 - `src/App.jsx` — Root component. Manages vault state, folder navigation, file/folder decryption, selected file state for detail view. Hides FAB when detail view is open.
 - `src/App.jsx` — Also contains the web vault recovery UI/workflow: detects decryption mismatch after successful auth, prompts for previous password, then re-encrypts all file blobs + metadata and folder metadata.
+- `src/components/Sidebar.jsx` + `src/components/FileList.jsx` — Web now includes an **All Files** view (`folderId: all`) that aggregates all decryptable non-trash files across folders.
 - `src/components/RecoverySettings.jsx` — Web-only settings panel for per-entry recovery: scans for file rows that fail decryption with current key, lets user provide previous password for one selected entry, decrypts + re-encrypts that item, and writes updated blob+metadata.
 - `src/components/MasterPassword.jsx` — Unlock screen with master password input and key derivation.
 - `src/components/Sidebar.jsx` — Navigation sidebar with default folders, recursive `FolderTreeItem` for custom folder hierarchy, expand/collapse, subfolder creation.
@@ -295,6 +296,7 @@ Main layout with responsive behavior:
 - **Note:** `flutter analyze` and `flutter test` have `continue-on-error: true` to not block APK builds during initial development.
 
 ### Known Issues & Future Work
+- **Web all-files aggregation added (Mar 2026):** Sidebar now has an All Files view showing every decryptable non-trash item regardless of folder assignment.
 - **Vault migration prompt error handling improved (Mar 2026):** Full-vault web migration now handles legacy `fileIv` formats and surfaces explicit per-stage errors (metadata decrypt, blob decrypt, folder decrypt) instead of generic WebCrypto operation-specific failures.
 - **Web per-entry recovery hardening (Mar 2026):** Recovery now handles legacy `fileIv` formats (JSON string vs array) and surfaces targeted errors for metadata-decrypt vs blob-decrypt failures instead of generic WebCrypto operation errors.
 - **Web granular recovery added (Mar 2026):** Settings now includes a per-entry recovery tool for failed file decryptions when full-vault migration is not available or previously failed.
