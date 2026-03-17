@@ -3,6 +3,35 @@ import { X, UploadCloud } from 'lucide-react';
 import styles from './UploadModal.module.css';
 import { encryptFile, encryptMetadata, generateUUID } from '../utils/crypto';
 
+async function uploadEncryptedBlobDirect(encryptedBlob, authPassword) {
+  const cfgRes = await fetch('/api/cloudinary-config', {
+    headers: {
+      Authorization: `Bearer ${authPassword}`,
+    },
+  });
+  if (!cfgRes.ok) {
+    throw new Error('Failed to fetch Cloudinary upload config');
+  }
+  const cfg = await cfgRes.json();
+
+  const endpoint = `https://api.cloudinary.com/v1_1/${cfg.cloudName}/${cfg.resourceType}/upload`;
+  const formData = new FormData();
+  formData.append('file', encryptedBlob, 'encrypted_blob');
+  formData.append('upload_preset', cfg.uploadPreset);
+
+  const uploadRes = await fetch(endpoint, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!uploadRes.ok) {
+    const details = await uploadRes.text().catch(() => 'Unknown Cloudinary error');
+    throw new Error(`Failed to upload to Cloudinary: ${details}`);
+  }
+
+  const data = await uploadRes.json();
+  return data.secure_url;
+}
+
 export default function UploadModal({ isOpen, onClose, vaultContext, currentFolder, onUploadSuccess, onUploadFiles }) {
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef(null);
@@ -20,19 +49,10 @@ export default function UploadModal({ isOpen, onClose, vaultContext, currentFold
       } else {
         const file = selectedFiles[0];
         const { encryptedBlob, iv, originalName, originalType, size } = await encryptFile(file, vaultContext.aesKey);
-        const formData = new FormData();
-        formData.append('file', encryptedBlob, 'encrypted_blob');
-
-        const uploadRes = await fetch('/api/upload', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${vaultContext.authPassword}`
-          },
-          body: formData
-        });
-
-        if (!uploadRes.ok) throw new Error('Failed to upload file to storage');
-        const { url: cloudinary_url } = await uploadRes.json();
+        const cloudinary_url = await uploadEncryptedBlobDirect(
+          encryptedBlob,
+          vaultContext.authPassword,
+        );
 
         const blobId = generateUUID();
         const metadataToEncrypt = {

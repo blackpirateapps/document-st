@@ -19,6 +19,42 @@ const STATIC_SALT = new Uint8Array([
   1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16,
 ]);
 
+async function fetchCloudinaryConfig(authPassword) {
+  const res = await fetch('/api/cloudinary-config', {
+    headers: {
+      Authorization: `Bearer ${authPassword}`,
+    },
+  });
+  if (!res.ok) {
+    throw new Error('Failed to fetch Cloudinary upload config');
+  }
+  return res.json();
+}
+
+async function uploadEncryptedBlobDirect(encryptedBlob, authPassword) {
+  const cfg = await fetchCloudinaryConfig(authPassword);
+  const endpoint = `https://api.cloudinary.com/v1_1/${cfg.cloudName}/${cfg.resourceType}/upload`;
+  const formData = new FormData();
+  formData.append('file', encryptedBlob, 'encrypted_blob');
+  formData.append('upload_preset', cfg.uploadPreset);
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    body: formData,
+  });
+
+  if (!res.ok) {
+    const details = await res.text().catch(() => 'Unknown Cloudinary error');
+    throw new Error(`Cloudinary upload failed: ${details}`);
+  }
+
+  const data = await res.json();
+  if (!data?.secure_url) {
+    throw new Error('Cloudinary upload succeeded without secure_url');
+  }
+  return data.secure_url;
+}
+
 function normalizeFileMetadata(meta, fallbackDate) {
   const rawProps = Array.isArray(meta?.properties) ? meta.properties : [];
   const properties = rawProps.map((p) => ({
@@ -98,19 +134,10 @@ function App() {
         const { encryptedBlob, iv, originalName, originalType, size } =
           await encryptFile(file, vaultContext.aesKey);
 
-        const formData = new FormData();
-        formData.append('file', encryptedBlob, 'encrypted_blob');
-
-        const uploadRes = await fetch('/api/upload', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${vaultContext.authPassword}`,
-          },
-          body: formData,
-        });
-
-        if (!uploadRes.ok) throw new Error('Failed to upload file to storage');
-        const { url: cloudinary_url } = await uploadRes.json();
+        const cloudinary_url = await uploadEncryptedBlobDirect(
+          encryptedBlob,
+          vaultContext.authPassword,
+        );
 
         const blobId = generateUUID();
         const metadataToEncrypt = {
@@ -218,20 +245,10 @@ function App() {
         };
         const encryptedMeta = await encryptMetadata(nextMeta, vaultContext.aesKey);
 
-        const formData = new FormData();
-        formData.append('file', reencrypted.encryptedBlob, 'encrypted_blob');
-
-        const uploadRes = await fetch('/api/upload', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${vaultContext.authPassword}`,
-          },
-          body: formData,
-        });
-        if (!uploadRes.ok) {
-          throw new Error('Failed to upload migrated file blob');
-        }
-        const { url: nextCloudinaryUrl } = await uploadRes.json();
+        const nextCloudinaryUrl = await uploadEncryptedBlobDirect(
+          reencrypted.encryptedBlob,
+          vaultContext.authPassword,
+        );
 
         const updateRes = await fetch('/api/files', {
           method: 'PUT',

@@ -150,6 +150,7 @@ All design tokens are defined in `src/index.css` `:root`. Components reference C
 - `src/components/MasterPassword.module.css` — Unlock screen with frosted glass.
 
 ### Server API (Vercel Serverless)
+- `api/cloudinary-config.js` — Returns Cloudinary upload settings (`cloudName`, unsigned `uploadPreset`, `resourceType`) after Bearer auth for direct client uploads.
 - `api/upload.js` — Parses encrypted file upload via `formidable` and pushes to Cloudinary.
 - `api/files.js` — Turso DB endpoints for file records (GET, POST, PUT). `PUT` supports optional `cloudinary_url` updates for migration.
 - `api/folders.js` — Turso DB endpoints for folder records (GET, POST, PUT).
@@ -261,7 +262,8 @@ HTTP client targeting `https://document-st.vercel.app`:
 - `updateFile(...)` — `PUT /api/files` with updated encrypted metadata (and optional migrated `cloudinary_url`).
 - `createFolder(...)` — `POST /api/folders`.
 - `updateFolder(...)` — `PUT /api/folders` with updated encrypted folder metadata.
-- `uploadEncryptedFile(...)` — Multipart `POST /api/upload` with encrypted bytes.
+- `fetchCloudinaryConfig()` — `GET /api/cloudinary-config` for direct upload parameters.
+- `uploadEncryptedFile(...)` — uploads encrypted bytes directly to Cloudinary unsigned upload endpoint using preset `vercel`.
 - `fetchRawFile(url)` — `GET` the encrypted blob from Cloudinary.
 
 #### `lib/services/vault_provider.dart`
@@ -292,6 +294,8 @@ Main layout with responsive behavior:
 - **Note:** `flutter analyze` and `flutter test` have `continue-on-error: true` to not block APK builds during initial development.
 
 ### Known Issues & Future Work
+- **Direct Cloudinary uploads implemented (Mar 2026):** Web and Flutter now upload encrypted blobs directly to Cloudinary using unsigned preset `vercel` (via `/api/cloudinary-config`) to avoid Vercel function upload timeouts.
+- **Mobile vault visibility bug fixed (Mar 2026):** Adjusted recovery-trigger detection so empty decrypt results caused by schema/data edge cases no longer hide valid uploads/trash views.
 - **Password rotation recovery implemented (Mar 2026):** Both web and Flutter now detect all-row decryption failure after successful auth and prompt for the previous decryption password to migrate data.
 - **Migration write-paths expanded (Mar 2026):** Added `PUT /api/folders` and optional `cloudinary_url` updates in `PUT /api/files` to support full blob + metadata re-encryption.
 - **Release build breakage fixed (Mar 2026):** `CupertinoIcons.key_fill` is not available in Flutter 3.24, so `mobile/lib/screens/file_detail_screen.dart` now uses `CupertinoIcons.key` in the Encryption section to keep `assembleRelease` compiling.

@@ -294,6 +294,8 @@ class VaultProvider extends ChangeNotifier {
       // Fetch and decrypt folders
       final rawFolders = await _api!.fetchFolders();
       final decryptedFolders = <VaultFolder>[];
+      var failedFiles = rawFiles.isNotEmpty;
+      var failedFolders = rawFolders.isNotEmpty;
       for (final row in rawFolders) {
         try {
           final ivList =
@@ -314,14 +316,21 @@ class VaultProvider extends ChangeNotifier {
                   DateTime.now().toIso8601String(),
             ),
           );
+          failedFolders = false;
         } catch (e) {
           debugPrint('Failed to decrypt folder ${row['id']}: $e');
         }
       }
 
+      if (decrypted.isNotEmpty) {
+        failedFiles = false;
+      }
+
       final totalRows = rawFiles.length + rawFolders.length;
       final totalDecrypted = decrypted.length + decryptedFolders.length;
-      if (totalRows > 0 && totalDecrypted == 0) {
+      if (totalRows > 0 &&
+          totalDecrypted == 0 &&
+          (failedFiles || failedFolders)) {
         _needsRecovery = true;
         _recoveryFileRows = rawFiles;
         _recoveryFolderRows = rawFolders;

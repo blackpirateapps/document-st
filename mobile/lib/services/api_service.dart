@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
-import 'package:http_parser/http_parser.dart';
 
 /// API service that talks to the Vercel serverless endpoints.
 class ApiService {
@@ -33,6 +32,20 @@ class ApiService {
     }
     final List<dynamic> data = jsonDecode(response.body);
     return data.cast<Map<String, dynamic>>();
+  }
+
+  /// GET /api/cloudinary-config
+  Future<Map<String, dynamic>> fetchCloudinaryConfig() async {
+    final response = await http.get(
+      Uri.parse('$baseUrl/api/cloudinary-config'),
+      headers: _authOnly,
+    );
+    if (response.statusCode != 200) {
+      throw Exception(
+        'Failed to fetch Cloudinary config: ${response.statusCode}',
+      );
+    }
+    return jsonDecode(response.body) as Map<String, dynamic>;
   }
 
   /// POST /api/files — create new file record.
@@ -140,29 +153,38 @@ class ApiService {
 
   // ── Upload ──
 
-  /// POST /api/upload — upload encrypted blob, returns { url }.
+  /// Upload encrypted blob directly to Cloudinary via unsigned preset.
   Future<String> uploadEncryptedBlob(Uint8List encryptedBytes) async {
+    final cfg = await fetchCloudinaryConfig();
+    final cloudName = cfg['cloudName'] as String;
+    final uploadPreset = cfg['uploadPreset'] as String;
+    final resourceType = cfg['resourceType'] as String;
+
     final request = http.MultipartRequest(
       'POST',
-      Uri.parse('$baseUrl/api/upload'),
+      Uri.parse(
+        'https://api.cloudinary.com/v1_1/$cloudName/$resourceType/upload',
+      ),
     );
-    request.headers['Authorization'] = 'Bearer $authPassword';
     request.files.add(
       http.MultipartFile.fromBytes(
         'file',
         encryptedBytes,
         filename: 'encrypted_blob',
-        contentType: MediaType('application', 'octet-stream'),
       ),
     );
+    request.fields['upload_preset'] = uploadPreset;
 
     final streamed = await request.send();
     if (streamed.statusCode != 200) {
-      throw Exception('Failed to upload: ${streamed.statusCode}');
+      final err = await streamed.stream.bytesToString();
+      throw Exception(
+        'Failed to upload to Cloudinary: ${streamed.statusCode} $err',
+      );
     }
     final respBody = await streamed.stream.bytesToString();
     final data = jsonDecode(respBody);
-    return data['url'] as String;
+    return data['secure_url'] as String;
   }
 
   /// Fetch raw bytes from a URL (for downloading encrypted blobs from Cloudinary).
