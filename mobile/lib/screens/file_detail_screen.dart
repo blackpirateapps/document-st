@@ -299,7 +299,7 @@ class _FileDetailScreenState extends State<FileDetailScreen> {
                             'AES-256-GCM',
                           ),
                           _infoTile(
-                            CupertinoIcons.key,
+                            CupertinoIcons.lock,
                             'Key Derivation',
                             'PBKDF2 (100k iterations)',
                           ),
