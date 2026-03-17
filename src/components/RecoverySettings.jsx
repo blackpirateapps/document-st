@@ -19,13 +19,32 @@ function normalizeFileMetadata(meta, fallbackDate) {
       meta?.originalType?.toString?.() || 'application/octet-stream',
     size: Number(meta?.size || 0),
     folderId: meta?.folderId?.toString?.() || 'inbox',
-    fileIv: Array.isArray(meta?.fileIv) ? meta.fileIv.map((v) => Number(v)) : [],
+    fileIv: parseIvField(meta?.fileIv),
     starred: meta?.starred === true,
     description: meta?.description?.toString?.() || '',
     properties,
     dateAdded:
       meta?.dateAdded?.toString?.() || fallbackDate || new Date().toISOString(),
   };
+}
+
+function parseIvField(rawIv) {
+  if (Array.isArray(rawIv)) {
+    return rawIv.map((v) => Number(v));
+  }
+
+  if (typeof rawIv === 'string') {
+    try {
+      const parsed = JSON.parse(rawIv);
+      if (Array.isArray(parsed)) {
+        return parsed.map((v) => Number(v));
+      }
+    } catch (_) {
+      return [];
+    }
+  }
+
+  return [];
 }
 
 async function uploadEncryptedBlobDirect(encryptedBlob, authPassword) {
@@ -116,20 +135,36 @@ export default function RecoverySettings({ vaultContext, onMigrationApplied }) {
     try {
       const { key: oldKey } = await deriveKey(previousPassword, STATIC_SALT);
       const oldIv = JSON.parse(selectedRow.metadata_iv);
-      const oldMeta = await decryptMetadata(selectedRow.encrypted_metadata, oldIv, oldKey);
+      let oldMeta;
+      try {
+        oldMeta = await decryptMetadata(selectedRow.encrypted_metadata, oldIv, oldKey);
+      } catch (_) {
+        throw new Error('Previous password could not decrypt selected metadata.');
+      }
+
       const normalized = normalizeFileMetadata(oldMeta, selectedRow.created_at);
+      if (!normalized.fileIv.length) {
+        throw new Error('Selected entry has invalid or missing file IV metadata.');
+      }
 
       const blobRes = await fetch(selectedRow.cloudinary_url);
       if (!blobRes.ok) {
         throw new Error('Failed to fetch encrypted blob from Cloudinary');
       }
       const encryptedBlob = await blobRes.blob();
-      const plainBlob = await decryptFile(
-        encryptedBlob,
-        oldKey,
-        normalized.fileIv,
-        normalized.originalType,
-      );
+      let plainBlob;
+      try {
+        plainBlob = await decryptFile(
+          encryptedBlob,
+          oldKey,
+          normalized.fileIv,
+          normalized.originalType,
+        );
+      } catch (_) {
+        throw new Error(
+          'Password decrypted metadata but failed on file blob. This entry may use a different legacy password or blob/IV mismatch.',
+        );
+      }
 
       setStatus('Re-encrypting with current password...');
       const fileLike = {
