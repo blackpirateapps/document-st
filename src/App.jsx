@@ -62,9 +62,7 @@ function normalizeFileMetadata(meta, fallbackDate) {
     key: p?.key?.toString?.() || '',
     value: p?.value?.toString?.() || '',
   }));
-  const fileIv = Array.isArray(meta?.fileIv)
-    ? meta.fileIv.map((v) => Number(v))
-    : [];
+  const fileIv = parseIvField(meta?.fileIv);
 
   return {
     originalName: meta?.originalName?.toString?.() || 'Unknown',
@@ -79,6 +77,25 @@ function normalizeFileMetadata(meta, fallbackDate) {
     dateAdded:
       meta?.dateAdded?.toString?.() || fallbackDate || new Date().toISOString(),
   };
+}
+
+function parseIvField(rawIv) {
+  if (Array.isArray(rawIv)) {
+    return rawIv.map((v) => Number(v));
+  }
+
+  if (typeof rawIv === 'string') {
+    try {
+      const parsed = JSON.parse(rawIv);
+      if (Array.isArray(parsed)) {
+        return parsed.map((v) => Number(v));
+      }
+    } catch (_) {
+      return [];
+    }
+  }
+
+  return [];
 }
 
 function normalizeFolderMetadata(meta, fallbackDate) {
@@ -217,20 +234,39 @@ function App() {
       const migratedFiles = [];
       for (const row of recoveryState.fileRows) {
         const oldIv = JSON.parse(row.metadata_iv);
-        const oldMeta = await decryptMetadata(row.encrypted_metadata, oldIv, oldKey);
+        let oldMeta;
+        try {
+          oldMeta = await decryptMetadata(row.encrypted_metadata, oldIv, oldKey);
+        } catch (_) {
+          throw new Error(
+            `Could not decrypt metadata for file ${row.id}. The previous password is likely incorrect for this entry.`,
+          );
+        }
         const normalizedMeta = normalizeFileMetadata(oldMeta, row.created_at);
+        if (!normalizedMeta.fileIv.length) {
+          throw new Error(
+            `File ${row.id} has missing or invalid IV metadata. Use Settings > Recovery to migrate this entry individually.`,
+          );
+        }
 
         const blobRes = await fetch(row.cloudinary_url);
         if (!blobRes.ok) {
           throw new Error(`Failed to fetch encrypted blob for ${row.id}`);
         }
         const encryptedBlob = await blobRes.blob();
-        const plainBlob = await decryptFile(
-          encryptedBlob,
-          oldKey,
-          normalizedMeta.fileIv,
-          normalizedMeta.originalType,
-        );
+        let plainBlob;
+        try {
+          plainBlob = await decryptFile(
+            encryptedBlob,
+            oldKey,
+            normalizedMeta.fileIv,
+            normalizedMeta.originalType,
+          );
+        } catch (_) {
+          throw new Error(
+            `Could not decrypt file blob for ${row.id}. Metadata decrypted but blob decryption failed. Use Settings > Recovery for targeted migration.`,
+          );
+        }
 
         const fileLike = {
           arrayBuffer: () => plainBlob.arrayBuffer(),
@@ -278,7 +314,14 @@ function App() {
       const migratedFolders = [];
       for (const row of recoveryState.folderRows) {
         const oldIv = JSON.parse(row.metadata_iv);
-        const oldMeta = await decryptMetadata(row.encrypted_metadata, oldIv, oldKey);
+        let oldMeta;
+        try {
+          oldMeta = await decryptMetadata(row.encrypted_metadata, oldIv, oldKey);
+        } catch (_) {
+          throw new Error(
+            `Could not decrypt folder metadata for ${row.id}. The previous password may not match this entry.`,
+          );
+        }
         const nextMeta = normalizeFolderMetadata(oldMeta, row.created_at);
         const encryptedMeta = await encryptMetadata(nextMeta, vaultContext.aesKey);
 

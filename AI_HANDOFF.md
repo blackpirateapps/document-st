@@ -295,6 +295,7 @@ Main layout with responsive behavior:
 - **Note:** `flutter analyze` and `flutter test` have `continue-on-error: true` to not block APK builds during initial development.
 
 ### Known Issues & Future Work
+- **Vault migration prompt error handling improved (Mar 2026):** Full-vault web migration now handles legacy `fileIv` formats and surfaces explicit per-stage errors (metadata decrypt, blob decrypt, folder decrypt) instead of generic WebCrypto operation-specific failures.
 - **Web per-entry recovery hardening (Mar 2026):** Recovery now handles legacy `fileIv` formats (JSON string vs array) and surfaces targeted errors for metadata-decrypt vs blob-decrypt failures instead of generic WebCrypto operation errors.
 - **Web granular recovery added (Mar 2026):** Settings now includes a per-entry recovery tool for failed file decryptions when full-vault migration is not available or previously failed.
 - **Direct Cloudinary uploads implemented (Mar 2026):** Web and Flutter now upload encrypted blobs directly to Cloudinary using unsigned preset `vercel` (via `/api/cloudinary-config`) to avoid Vercel function upload timeouts.
