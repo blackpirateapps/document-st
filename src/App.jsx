@@ -598,10 +598,6 @@ function App() {
     };
   }, [vaultContext, currentFolder, recoveryState.needed]);
 
-  if (!vaultContext) {
-    return <MasterPassword onUnlock={handleUnlock} />;
-  }
-
   const handleFileUpdate = (updatedFile) => {
     setFiles((prev) => prev.map((f) => (f.id === updatedFile.id ? updatedFile : f)));
     if (selectedFile && selectedFile.id === updatedFile.id) {
@@ -646,7 +642,7 @@ function App() {
           limitBytes: usage?.storage?.limit_bytes,
         },
       });
-    } catch (_) {
+    } catch {
       setCloudinaryUsage((prev) => ({
         ...prev,
         loading: false,
@@ -666,6 +662,10 @@ function App() {
       .filter((f) => f.folderId !== 'trash')
       .reduce((sum, f) => sum + (Number(f.size) || 0), 0),
   };
+
+  if (!vaultContext) {
+    return <MasterPassword onUnlock={handleUnlock} />;
+  }
 
   return (
     <div className={styles.appContainer}>
