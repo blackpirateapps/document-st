@@ -110,8 +110,8 @@ class CryptoService {
 
     final output = Uint8List(cipher.getOutputSize(plain.length));
     final len = cipher.processBytes(plain, 0, plain.length, output, 0);
-    cipher.doFinal(output, len);
-    return output;
+    final finalLen = cipher.doFinal(output, len);
+    return Uint8List.fromList(output.sublist(0, len + finalLen));
   }
 
   /// AES-GCM decrypt.

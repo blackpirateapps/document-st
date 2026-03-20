@@ -297,6 +297,7 @@ Main layout with responsive behavior:
 - **Note:** `flutter analyze` and `flutter test` have `continue-on-error: true` to not block APK builds during initial development.
 
 ### Known Issues & Future Work
+- **Mobile ciphertext truncation bug fixed (Mar 2026):** `CryptoService._aesGcmEncrypt` now returns only `len + finalLen` bytes from PointyCastle output. This fixes Android uploads that previously produced invalid ciphertext/tag bytes, causing decrypt failures and records disappearing after refresh (including web decryption failure).
 - **Mobile UX and navigation upgrades (Mar 2026):** Added All Files section, animated mobile sidebar open, folder creation loading states, and + action sheet for upload/create folder from file list.
 - **Mobile folder management in file list (Mar 2026):** Subfolders now render in file list for the active folder and support rename/move actions from long-press.
 - **Mobile encrypted blob reuse (Mar 2026):** File view/download now caches encrypted blob bytes locally after first fetch and reuses cache on subsequent views for faster open/decrypt.
