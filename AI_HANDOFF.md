@@ -273,9 +273,10 @@ ChangeNotifier that manages all app state:
 - Holds `_keyBytes`, `_password`, `_files`, `_folders`, `_currentFolderId`, `_selectedFile`, `_sidebarOpen`, `_uploadQueue`.
 - `unlock(password)` — authenticates and derives key; if server auth passes but decryption fails for all rows, returns a recovery-required state instead of unlocking.
 - `recoverVaultWithPreviousPassword(previousPassword)` — decrypts all server rows with old key, re-encrypts with current key, uploads new encrypted blobs, updates file and folder records, and refreshes local cache.
-- CRUD operations: `uploadFile`, `uploadFiles` (batch), `renameFile`, `moveFile`, `copyFile`, `trashFile`, `toggleStar`, `createFolder`, `deleteFolder`.
+- CRUD operations: `uploadFile`, `uploadFiles` (batch), `renameFile`, `moveFile`, `copyFile`, `trashFile`, `toggleStar`, `createFolder`, `renameFolder`, `moveFolder`, `deleteFilePermanently`.
 - All mutations re-encrypt metadata and PUT/POST to the API, then call `_saveToCache()` to persist locally.
-- **Offline caching:** Uses `shared_preferences` with keys `vault_cached_files`, `vault_cached_folders`, `vault_cache_ts`. Decrypted vault data is cached as JSON after every mutation.
+- **Offline caching:** Uses `shared_preferences` with keys `vault_cached_files`, `vault_cached_folders`, `vault_cache_ts`.
+- **Encrypted blob cache:** Once a file is viewed/downloaded, encrypted bytes are cached in device temp storage (`vault_enc_<fileId>.bin`) and tracked via `vault_cached_blob_ids` so subsequent opens decrypt locally without re-downloading.
 - **Upload queue:** `UploadTask` class tracks `id`, `fileName`, `progress`, `status` (encrypting/uploading/saving/done/error), `error`. `_processUpload()` runs asynchronously and non-blocking. Completed tasks auto-dismiss after 3 seconds.
 - **Sidebar state:** `sidebarOpen`, `toggleSidebar()`, `closeSidebar()` — controls the mobile drawer.
 - **Lock:** `lock()` clears all sensitive data (key, password, files, folders, cache) from memory.
@@ -283,8 +284,8 @@ ChangeNotifier that manages all app state:
 #### `lib/screens/home_screen.dart`
 Main layout with responsive behavior:
 - **Wide screens (>=600px):** Permanent left sidebar.
-- **Phone screens (<600px):** Overlay drawer with dark backdrop, opened via hamburger menu button in `file_list_screen.dart`.
-- Sidebar contents: folder tree (recursive with expand/collapse), default folders (All Files, Starred, Trash), file count badges per folder, create folder dialog, settings gear icon.
+- **Phone screens (<600px):** Overlay drawer with animated backdrop + slide-in drawer, opened via hamburger menu button in `file_list_screen.dart`.
+- Sidebar contents: folder tree (recursive with expand/collapse), default folders including **All Files**, file count badges per folder, create folder dialog with loading state, settings gear icon.
 - Upload progress section in sidebar: shows active `UploadTask` items with status icons, file names, custom progress bars. Completed tasks auto-dismiss after 3 seconds; error tasks can be manually dismissed.
 - Right content area: switches between `FileListScreen`, `FileDetailScreen`, `SettingsScreen` based on state.
 
@@ -296,6 +297,9 @@ Main layout with responsive behavior:
 - **Note:** `flutter analyze` and `flutter test` have `continue-on-error: true` to not block APK builds during initial development.
 
 ### Known Issues & Future Work
+- **Mobile UX and navigation upgrades (Mar 2026):** Added All Files section, animated mobile sidebar open, folder creation loading states, and + action sheet for upload/create folder from file list.
+- **Mobile folder management in file list (Mar 2026):** Subfolders now render in file list for the active folder and support rename/move actions from long-press.
+- **Mobile encrypted blob reuse (Mar 2026):** File view/download now caches encrypted blob bytes locally after first fetch and reuses cache on subsequent views for faster open/decrypt.
 - **Web all-files aggregation added (Mar 2026):** Sidebar now has an All Files view showing every decryptable non-trash item regardless of folder assignment.
 - **Vault migration prompt error handling improved (Mar 2026):** Full-vault web migration now handles legacy `fileIv` formats and surfaces explicit per-stage errors (metadata decrypt, blob decrypt, folder decrypt) instead of generic WebCrypto operation-specific failures.
 - **Web per-entry recovery hardening (Mar 2026):** Recovery now handles legacy `fileIv` formats (JSON string vs array) and surfaces targeted errors for metadata-decrypt vs blob-decrypt failures instead of generic WebCrypto operation errors.

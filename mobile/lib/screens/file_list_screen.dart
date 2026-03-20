@@ -5,6 +5,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:mime/mime.dart';
 import '../services/vault_provider.dart';
 import '../models/vault_file.dart';
+import '../models/vault_folder.dart';
 import '../theme/app_theme.dart';
 import 'pdf_preview_screen.dart';
 import 'package:intl/intl.dart';
@@ -35,6 +36,7 @@ class FileListScreen extends StatelessWidget {
         }
 
         final files = vault.currentFiles;
+        final subfolders = vault.currentSubfolders;
         final title = vault.folderName(vault.currentFolder);
 
         return Stack(
@@ -87,7 +89,7 @@ class FileListScreen extends StatelessWidget {
                   ),
                 ),
 
-                if (files.isEmpty)
+                if (files.isEmpty && subfolders.isEmpty)
                   SliverFillRemaining(
                     child: Center(
                       child: Column(
@@ -106,6 +108,8 @@ class FileListScreen extends StatelessWidget {
                           Text(
                             vault.currentFolder == 'starred'
                                 ? 'No starred files'
+                                : vault.currentFolder == 'all'
+                                ? 'No decrypted files yet'
                                 : vault.currentFolder == 'trash'
                                 ? 'Trash is empty'
                                 : 'No files in this folder',
@@ -118,7 +122,7 @@ class FileListScreen extends StatelessWidget {
                           Text(
                             vault.currentFolder == 'starred'
                                 ? 'Star files to find them quickly'
-                                : 'Tap + to upload a file',
+                                : 'Tap + to upload or create folder',
                             style: const TextStyle(
                               color: AppTheme.textTertiary,
                               fontSize: 13,
@@ -131,9 +135,13 @@ class FileListScreen extends StatelessWidget {
                 else
                   SliverList(
                     delegate: SliverChildBuilderDelegate((context, index) {
-                      final file = files[index];
+                      if (index < subfolders.length) {
+                        final folder = subfolders[index];
+                        return _FolderRow(folder: folder);
+                      }
+                      final file = files[index - subfolders.length];
                       return _FileRow(file: file);
-                    }, childCount: files.length),
+                    }, childCount: subfolders.length + files.length),
                   ),
               ],
             ),
@@ -143,7 +151,7 @@ class FileListScreen extends StatelessWidget {
               bottom: 32,
               right: 24,
               child: GestureDetector(
-                onTap: () => _handleUpload(context, vault),
+                onTap: () => _showAddSheet(context, vault),
                 child: Container(
                   width: 56,
                   height: 56,
@@ -199,6 +207,121 @@ class FileListScreen extends StatelessWidget {
     }
   }
 
+  Future<void> _showAddSheet(BuildContext context, VaultProvider vault) async {
+    showCupertinoModalPopup(
+      context: context,
+      builder: (ctx) => CupertinoActionSheet(
+        title: const Text('Add to Vault'),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _handleUpload(context, vault);
+            },
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.cloud_upload, size: 18),
+                SizedBox(width: 8),
+                Text('Upload Files'),
+              ],
+            ),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _showCreateFolderDialog(context, vault);
+            },
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.folder_badge_plus, size: 18),
+                SizedBox(width: 8),
+                Text('Create Folder'),
+              ],
+            ),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          child: const Text('Cancel'),
+          onPressed: () => Navigator.pop(ctx),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showCreateFolderDialog(
+    BuildContext context,
+    VaultProvider vault,
+  ) async {
+    final controller = TextEditingController();
+    const defaultFolders = {
+      'all',
+      'inbox',
+      'starred',
+      'documents',
+      'photos',
+      'taxes',
+      'trash',
+    };
+    final parentId = defaultFolders.contains(vault.currentFolder)
+        ? null
+        : vault.currentFolder;
+
+    await showCupertinoDialog(
+      context: context,
+      builder: (ctx) {
+        bool creating = false;
+        return StatefulBuilder(
+          builder: (context, setDialogState) => CupertinoAlertDialog(
+            title: Text(parentId == null ? 'New Folder' : 'New Subfolder'),
+            content: Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: CupertinoTextField(
+                controller: controller,
+                placeholder: parentId == null
+                    ? 'Folder name'
+                    : 'Subfolder name',
+                autofocus: true,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
+            ),
+            actions: [
+              CupertinoDialogAction(
+                onPressed: creating ? null : () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              CupertinoDialogAction(
+                isDefaultAction: true,
+                onPressed: creating
+                    ? null
+                    : () async {
+                        final name = controller.text.trim();
+                        if (name.isEmpty) return;
+                        setDialogState(() => creating = true);
+                        try {
+                          await vault.createFolder(name, parentId: parentId);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        } finally {
+                          if (ctx.mounted) {
+                            setDialogState(() => creating = false);
+                          }
+                        }
+                      },
+                child: creating
+                    ? const CupertinoActivityIndicator(radius: 8)
+                    : const Text('Create'),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   static void _showError(BuildContext context, String message) {
     showCupertinoDialog(
       context: context,
@@ -211,6 +334,225 @@ class FileListScreen extends StatelessWidget {
             onPressed: () => Navigator.pop(ctx),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _FolderRow extends StatelessWidget {
+  final VaultFolder folder;
+  const _FolderRow({required this.folder});
+
+  @override
+  Widget build(BuildContext context) {
+    final vault = context.read<VaultProvider>();
+    final fileCount = vault.files.where((f) => f.folderId == folder.id).length;
+    final childCount = vault.childrenOf(folder.id).length;
+
+    return GestureDetector(
+      onTap: () => vault.setCurrentFolder(folder.id),
+      onLongPress: () => _showFolderActions(context, vault),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        decoration: const BoxDecoration(
+          border: Border(
+            bottom: BorderSide(color: AppTheme.borderColor, width: 0.5),
+          ),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppTheme.accentBlueDim,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(
+                CupertinoIcons.folder_fill,
+                size: 20,
+                color: AppTheme.accentBlue,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    folder.name,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w600,
+                      color: AppTheme.textPrimary,
+                      letterSpacing: -0.2,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    '$fileCount file(s) · $childCount subfolder(s)',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textTertiary,
+                      letterSpacing: -0.1,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Icon(
+              CupertinoIcons.chevron_right,
+              size: 14,
+              color: AppTheme.textTertiary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showFolderActions(BuildContext context, VaultProvider vault) {
+    showCupertinoModalPopup(
+      context: context,
+      builder: (ctx) => CupertinoActionSheet(
+        title: Text(folder.name),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _showRenameFolderDialog(context, vault);
+            },
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.pencil, size: 18),
+                SizedBox(width: 8),
+                Text('Rename Folder'),
+              ],
+            ),
+          ),
+          CupertinoActionSheetAction(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _showMoveFolderDialog(context, vault);
+            },
+            child: const Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(CupertinoIcons.arrow_right_arrow_left, size: 18),
+                SizedBox(width: 8),
+                Text('Move Folder'),
+              ],
+            ),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          child: const Text('Cancel'),
+          onPressed: () => Navigator.pop(ctx),
+        ),
+      ),
+    );
+  }
+
+  void _showRenameFolderDialog(BuildContext context, VaultProvider vault) {
+    final controller = TextEditingController(text: folder.name);
+    showCupertinoDialog(
+      context: context,
+      builder: (ctx) => CupertinoAlertDialog(
+        title: const Text('Rename Folder'),
+        content: Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: CupertinoTextField(
+            controller: controller,
+            autofocus: true,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+        ),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('Cancel'),
+            onPressed: () => Navigator.pop(ctx),
+          ),
+          CupertinoDialogAction(
+            isDefaultAction: true,
+            child: const Text('Save'),
+            onPressed: () async {
+              final name = controller.text.trim();
+              if (name.isNotEmpty && name != folder.name) {
+                await vault.renameFolder(folder, name);
+              }
+              if (ctx.mounted) Navigator.pop(ctx);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showMoveFolderDialog(BuildContext context, VaultProvider vault) {
+    final parents = vault.validMoveParentsForFolder(folder.id);
+
+    showCupertinoModalPopup(
+      context: context,
+      builder: (ctx) => CupertinoActionSheet(
+        title: const Text('Move Folder'),
+        actions: [
+          CupertinoActionSheetAction(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              if (folder.parentId != null) {
+                await vault.moveFolder(folder, null);
+              }
+            },
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  folder.parentId == null
+                      ? CupertinoIcons.checkmark_circle_fill
+                      : CupertinoIcons.folder,
+                  size: 18,
+                  color: folder.parentId == null
+                      ? AppTheme.accentBlue
+                      : AppTheme.textSecondary,
+                ),
+                const SizedBox(width: 8),
+                const Text('Root'),
+              ],
+            ),
+          ),
+          ...parents.map(
+            (f) => CupertinoActionSheetAction(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                if (f.id != folder.parentId) {
+                  await vault.moveFolder(folder, f.id);
+                }
+              },
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    f.id == folder.parentId
+                        ? CupertinoIcons.checkmark_circle_fill
+                        : CupertinoIcons.folder,
+                    size: 18,
+                    color: f.id == folder.parentId
+                        ? AppTheme.accentBlue
+                        : AppTheme.textSecondary,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(vault.folderPathLabel(f.id)),
+                ],
+              ),
+            ),
+          ),
+        ],
+        cancelButton: CupertinoActionSheetAction(
+          child: const Text('Cancel'),
+          onPressed: () => Navigator.pop(ctx),
+        ),
       ),
     );
   }
@@ -312,7 +654,7 @@ class _FileRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    '${_formatSize(file.size)} · $dateStr',
+                    '${vault.folderPathLabel(file.folderId)} · ${_formatSize(file.size)} · $dateStr',
                     style: const TextStyle(
                       fontSize: 12,
                       color: AppTheme.textTertiary,
@@ -436,6 +778,29 @@ class _FileRow extends StatelessWidget {
               ],
             ),
           ),
+          if (file.folderId == 'trash')
+            CupertinoActionSheetAction(
+              isDestructiveAction: true,
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final confirmed = await _confirmDeletePermanently(context);
+                if (confirmed) {
+                  await vault.deleteFilePermanently(file);
+                }
+              },
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    CupertinoIcons.delete,
+                    size: 18,
+                    color: AppTheme.dangerRed,
+                  ),
+                  SizedBox(width: 8),
+                  Text('Delete Permanently'),
+                ],
+              ),
+            ),
         ],
         cancelButton: CupertinoActionSheetAction(
           child: const Text('Cancel'),
@@ -460,6 +825,32 @@ class _FileRow extends StatelessWidget {
           CupertinoDialogAction(
             isDestructiveAction: true,
             child: const Text('Trash'),
+            onPressed: () {
+              result = true;
+              Navigator.pop(ctx);
+            },
+          ),
+        ],
+      ),
+    );
+    return result;
+  }
+
+  Future<bool> _confirmDeletePermanently(BuildContext context) async {
+    bool result = false;
+    await showCupertinoDialog(
+      context: context,
+      builder: (ctx) => CupertinoAlertDialog(
+        title: const Text('Delete Permanently?'),
+        content: Text('Delete "${file.originalName}" permanently?'),
+        actions: [
+          CupertinoDialogAction(
+            child: const Text('Cancel'),
+            onPressed: () => Navigator.pop(ctx),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            child: const Text('Delete'),
             onPressed: () {
               result = true;
               Navigator.pop(ctx);
@@ -509,6 +900,7 @@ class _FileRow extends StatelessWidget {
 
   void _showMoveDialog(BuildContext context, VaultProvider vault) {
     final allFolders = [
+      {'id': 'all', 'name': 'All Files'},
       {'id': 'inbox', 'name': 'Inbox'},
       {'id': 'documents', 'name': 'Documents'},
       {'id': 'photos', 'name': 'Photos'},
@@ -525,7 +917,7 @@ class _FileRow extends StatelessWidget {
               (f) => CupertinoActionSheetAction(
                 onPressed: () async {
                   Navigator.pop(ctx);
-                  if (f['id'] != file.folderId) {
+                  if (f['id'] != file.folderId && f['id'] != 'all') {
                     await vault.moveFile(file, f['id']!);
                   }
                 },

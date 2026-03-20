@@ -12,6 +12,19 @@ class VaultFolder {
     required this.dateAdded,
   });
 
+  VaultFolder copyWith({
+    String? name,
+    bool setParentId = false,
+    String? parentId,
+  }) {
+    return VaultFolder(
+      id: id,
+      name: name ?? this.name,
+      parentId: setParentId ? parentId : this.parentId,
+      dateAdded: dateAdded,
+    );
+  }
+
   Map<String, dynamic> toMetadataJson() {
     return {'name': name, 'parentId': parentId, 'dateAdded': dateAdded};
   }

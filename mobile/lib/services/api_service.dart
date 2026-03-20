@@ -96,6 +96,17 @@ class ApiService {
     }
   }
 
+  /// DELETE /api/files?id=<id>
+  Future<void> deleteFile(String id) async {
+    final response = await http.delete(
+      Uri.parse('$baseUrl/api/files?id=$id'),
+      headers: _authOnly,
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to delete file: ${response.statusCode}');
+    }
+  }
+
   // ── Folders ──
 
   /// GET /api/folders

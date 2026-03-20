@@ -52,16 +52,38 @@ class _HomeLayout extends StatelessWidget {
                   return Stack(
                     children: [
                       // Backdrop
-                      GestureDetector(
-                        onTap: () => vault.closeSidebar(),
-                        child: Container(color: const Color(0x99000000)),
+                      TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 0, end: 1),
+                        duration: const Duration(milliseconds: 220),
+                        builder: (context, opacity, child) {
+                          return GestureDetector(
+                            onTap: () => vault.closeSidebar(),
+                            child: Container(
+                              color: Color.fromRGBO(0, 0, 0, 0.6 * opacity),
+                            ),
+                          );
+                        },
                       ),
                       // Drawer
-                      const Positioned(
+                      Positioned(
                         left: 0,
                         top: 0,
                         bottom: 0,
-                        child: _Sidebar(),
+                        child: TweenAnimationBuilder<Offset>(
+                          tween: Tween(
+                            begin: const Offset(-1, 0),
+                            end: Offset.zero,
+                          ),
+                          duration: const Duration(milliseconds: 240),
+                          curve: Curves.easeOutCubic,
+                          builder: (context, offset, child) {
+                            return FractionalTranslation(
+                              translation: offset,
+                              child: child,
+                            );
+                          },
+                          child: const _Sidebar(),
+                        ),
                       ),
                     ],
                   );
@@ -134,6 +156,13 @@ class _Sidebar extends StatelessWidget {
 
               // Default folders
               _SidebarItem(
+                icon: CupertinoIcons.square_stack_3d_down_right_fill,
+                label: 'All Files',
+                folderId: 'all',
+                isActive: vault.currentFolder == 'all',
+                count: vault.files.where((f) => f.folderId != 'trash').length,
+              ),
+              _SidebarItem(
                 icon: CupertinoIcons.tray_fill,
                 label: 'Inbox',
                 folderId: 'inbox',
@@ -203,11 +232,13 @@ class _Sidebar extends StatelessWidget {
                           color: AppTheme.fillQuaternary,
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: const Icon(
-                          CupertinoIcons.plus,
-                          size: 14,
-                          color: AppTheme.textTertiary,
-                        ),
+                        child: vault.isCreatingFolder
+                            ? const CupertinoActivityIndicator(radius: 6)
+                            : const Icon(
+                                CupertinoIcons.plus,
+                                size: 14,
+                                color: AppTheme.textTertiary,
+                              ),
                       ),
                     ),
                   ],
@@ -277,37 +308,54 @@ class _Sidebar extends StatelessWidget {
     final controller = TextEditingController();
     showCupertinoDialog(
       context: context,
-      builder: (ctx) => CupertinoAlertDialog(
-        title: Text(parentId != null ? 'New Subfolder' : 'New Folder'),
-        content: Padding(
-          padding: const EdgeInsets.only(top: 12),
-          child: CupertinoTextField(
-            controller: controller,
-            placeholder: parentId != null ? 'Subfolder name' : 'Folder name',
-            autofocus: true,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      builder: (ctx) {
+        bool creating = false;
+        return StatefulBuilder(
+          builder: (context, setState) => CupertinoAlertDialog(
+            title: Text(parentId != null ? 'New Subfolder' : 'New Folder'),
+            content: Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: CupertinoTextField(
+                controller: controller,
+                placeholder: parentId != null
+                    ? 'Subfolder name'
+                    : 'Folder name',
+                autofocus: true,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
+            ),
+            actions: [
+              CupertinoDialogAction(
+                isDestructiveAction: true,
+                onPressed: creating ? null : () => Navigator.pop(ctx),
+                child: const Text('Cancel'),
+              ),
+              CupertinoDialogAction(
+                isDefaultAction: true,
+                onPressed: creating
+                    ? null
+                    : () async {
+                        final name = controller.text.trim();
+                        if (name.isEmpty) return;
+                        setState(() => creating = true);
+                        try {
+                          await vault.createFolder(name, parentId: parentId);
+                          if (ctx.mounted) Navigator.pop(ctx);
+                        } finally {
+                          if (ctx.mounted) setState(() => creating = false);
+                        }
+                      },
+                child: creating
+                    ? const CupertinoActivityIndicator(radius: 8)
+                    : const Text('Create'),
+              ),
+            ],
           ),
-        ),
-        actions: [
-          CupertinoDialogAction(
-            isDestructiveAction: true,
-            child: const Text('Cancel'),
-            onPressed: () => Navigator.pop(ctx),
-          ),
-          CupertinoDialogAction(
-            isDefaultAction: true,
-            child: const Text('Create'),
-            onPressed: () async {
-              final name = controller.text.trim();
-              if (name.isEmpty) return;
-              try {
-                await vault.createFolder(name, parentId: parentId);
-              } catch (_) {}
-              if (ctx.mounted) Navigator.pop(ctx);
-            },
-          ),
-        ],
-      ),
+        );
+      },
     );
   }
 }

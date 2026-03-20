@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import '../models/vault_file.dart';
@@ -49,13 +51,15 @@ class VaultProvider extends ChangeNotifier {
 
   bool _isLoading = false;
   String? _error;
-  String _currentFolder = 'inbox';
+  String _currentFolder = 'all';
   VaultFile? _selectedFile;
   bool _sidebarOpen = false;
 
   List<VaultFile> _files = [];
   List<VaultFolder> _folders = [];
   List<UploadTask> _uploadQueue = [];
+  bool _isCreatingFolder = false;
+  final Set<String> _cachedFileIds = {};
   bool _needsRecovery = false;
   List<Map<String, dynamic>> _recoveryFileRows = [];
   List<Map<String, dynamic>> _recoveryFolderRows = [];
@@ -77,13 +81,26 @@ class VaultProvider extends ChangeNotifier {
       _recoveryFileRows.length + _recoveryFolderRows.length;
   bool get hasActiveUploads =>
       _uploadQueue.any((t) => t.status != 'done' && t.status != 'error');
+  bool get isCreatingFolder => _isCreatingFolder;
 
   /// Files filtered to current folder view.
   List<VaultFile> get currentFiles {
+    if (_currentFolder == 'all') {
+      return _files.where((f) => f.folderId != 'trash').toList();
+    }
     if (_currentFolder == 'starred') {
       return _files.where((f) => f.starred && f.folderId != 'trash').toList();
     }
     return _files.where((f) => f.folderId == _currentFolder).toList();
+  }
+
+  List<VaultFolder> get currentSubfolders {
+    if (_currentFolder == 'all' ||
+        _currentFolder == 'starred' ||
+        _currentFolder == 'trash') {
+      return const [];
+    }
+    return _folders.where((f) => f.parentId == _currentFolder).toList();
   }
 
   /// Root-level custom folders (no parent).
@@ -172,6 +189,7 @@ class VaultProvider extends ChangeNotifier {
   static const String _cacheKeyFiles = 'vault_cached_files';
   static const String _cacheKeyFolders = 'vault_cached_folders';
   static const String _cacheKeyTimestamp = 'vault_cache_ts';
+  static const String _cacheKeyBlobIds = 'vault_cached_blob_ids';
 
   Future<bool> _loadFromCache() async {
     try {
@@ -200,6 +218,11 @@ class VaultProvider extends ChangeNotifier {
           fallbackDate: m['fallbackDate'] as String,
         );
       }).toList();
+
+      final blobIdList = prefs.getStringList(_cacheKeyBlobIds) ?? const [];
+      _cachedFileIds
+        ..clear()
+        ..addAll(blobIdList);
 
       return _files.isNotEmpty || _folders.isNotEmpty;
     } catch (e) {
@@ -238,6 +261,8 @@ class VaultProvider extends ChangeNotifier {
         _cacheKeyTimestamp,
         DateTime.now().toIso8601String(),
       );
+
+      await prefs.setStringList(_cacheKeyBlobIds, _cachedFileIds.toList());
     } catch (e) {
       debugPrint('Cache save failed: $e');
     }
@@ -248,6 +273,9 @@ class VaultProvider extends ChangeNotifier {
     await prefs.remove(_cacheKeyFiles);
     await prefs.remove(_cacheKeyFolders);
     await prefs.remove(_cacheKeyTimestamp);
+    await prefs.remove(_cacheKeyBlobIds);
+    await _purgeEncryptedBlobFiles();
+    _cachedFileIds.clear();
   }
 
   // ── Data Fetching ──
@@ -499,7 +527,7 @@ class VaultProvider extends ChangeNotifier {
       _files = migratedFiles;
       _folders = migratedFolders;
       _selectedFile = null;
-      _currentFolder = 'inbox';
+      _currentFolder = 'all';
       _needsRecovery = false;
       _recoveryFileRows = [];
       _recoveryFolderRows = [];
@@ -738,7 +766,10 @@ class VaultProvider extends ChangeNotifier {
         'originalName': fileName,
         'originalType': mimeType,
         'size': fileBytes.length,
-        'folderId': _currentFolder == 'starred' || _currentFolder == 'trash'
+        'folderId':
+            _currentFolder == 'starred' ||
+                _currentFolder == 'trash' ||
+                _currentFolder == 'all'
             ? 'inbox'
             : _currentFolder,
         'fileIv': iv.toList(),
@@ -792,33 +823,179 @@ class VaultProvider extends ChangeNotifier {
 
   /// Create a new folder.
   Future<void> createFolder(String name, {String? parentId}) async {
+    _isCreatingFolder = true;
+    notifyListeners();
     final newId = const Uuid().v4();
     final meta = {
       'name': name,
       'parentId': parentId,
       'dateAdded': DateTime.now().toIso8601String(),
     };
-    final encrypted = CryptoService.encryptMetadata(meta, _keyBytes!);
-    await _api!.createFolder(
-      id: newId,
+    try {
+      final encrypted = CryptoService.encryptMetadata(meta, _keyBytes!);
+      await _api!.createFolder(
+        id: newId,
+        encryptedMetadata: encrypted['data'] as String,
+        metadataIv: jsonEncode(encrypted['iv']),
+      );
+      _folders.add(
+        VaultFolder.fromDecryptedMeta(
+          id: newId,
+          meta: meta,
+          fallbackDate: DateTime.now().toIso8601String(),
+        ),
+      );
+      await _saveToCache();
+    } finally {
+      _isCreatingFolder = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> renameFolder(VaultFolder folder, String newName) async {
+    final updated = folder.copyWith(name: newName);
+    final encrypted = CryptoService.encryptMetadata(
+      updated.toMetadataJson(),
+      _keyBytes!,
+    );
+    await _api!.updateFolder(
+      id: folder.id,
       encryptedMetadata: encrypted['data'] as String,
       metadataIv: jsonEncode(encrypted['iv']),
     );
-    _folders.add(
-      VaultFolder.fromDecryptedMeta(
-        id: newId,
-        meta: meta,
-        fallbackDate: DateTime.now().toIso8601String(),
-      ),
-    );
+
+    final idx = _folders.indexWhere((f) => f.id == folder.id);
+    if (idx >= 0) {
+      _folders[idx] = updated;
+    }
     await _saveToCache();
     notifyListeners();
   }
 
+  Future<void> moveFolder(VaultFolder folder, String? targetParentId) async {
+    if (targetParentId == folder.id) return;
+    final updated = folder.copyWith(
+      setParentId: true,
+      parentId: targetParentId,
+    );
+    final encrypted = CryptoService.encryptMetadata(
+      updated.toMetadataJson(),
+      _keyBytes!,
+    );
+    await _api!.updateFolder(
+      id: folder.id,
+      encryptedMetadata: encrypted['data'] as String,
+      metadataIv: jsonEncode(encrypted['iv']),
+    );
+
+    final idx = _folders.indexWhere((f) => f.id == folder.id);
+    if (idx >= 0) {
+      _folders[idx] = updated;
+    }
+    await _saveToCache();
+    notifyListeners();
+  }
+
+  bool _isFolderDescendant(String candidateId, String ancestorId) {
+    String? cursor = candidateId;
+    var guard = 0;
+    while (cursor != null && guard < 200) {
+      if (cursor == ancestorId) return true;
+      final f = _folders.where((x) => x.id == cursor).firstOrNull;
+      cursor = f?.parentId;
+      guard += 1;
+    }
+    return false;
+  }
+
+  List<VaultFolder> validMoveParentsForFolder(String folderId) {
+    return _folders
+        .where((f) => f.id != folderId && !_isFolderDescendant(f.id, folderId))
+        .toList();
+  }
+
+  String folderPathLabel(String folderId) {
+    final parts = <String>[];
+    String? cursor = folderId;
+    var guard = 0;
+    while (cursor != null && guard < 200) {
+      final folder = _folders.where((f) => f.id == cursor).firstOrNull;
+      if (folder == null) break;
+      parts.insert(0, folder.name);
+      cursor = folder.parentId;
+      guard += 1;
+    }
+    if (parts.isEmpty) {
+      return folderName(folderId);
+    }
+    return parts.join(' / ');
+  }
+
   /// Decrypt file bytes for download/preview.
   Future<Uint8List> decryptFileForView(VaultFile file) async {
+    final cached = await _readEncryptedBlobFromDisk(file.id);
+    if (cached != null) {
+      try {
+        return CryptoService.decryptFileBytes(cached, _keyBytes!, file.fileIv);
+      } catch (_) {
+        await _deleteEncryptedBlobFromDisk(file.id);
+      }
+    }
+
     final encrypted = await _api!.fetchRawBytes(file.cloudinaryUrl);
+    await _writeEncryptedBlobToDisk(file.id, encrypted);
     return CryptoService.decryptFileBytes(encrypted, _keyBytes!, file.fileIv);
+  }
+
+  Future<Uint8List?> _readEncryptedBlobFromDisk(String fileId) async {
+    if (!_cachedFileIds.contains(fileId)) return null;
+    try {
+      final dir = await getTemporaryDirectory();
+      final f = File('${dir.path}/vault_enc_$fileId.bin');
+      if (!await f.exists()) {
+        _cachedFileIds.remove(fileId);
+        return null;
+      }
+      return await f.readAsBytes();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _writeEncryptedBlobToDisk(String fileId, Uint8List bytes) async {
+    try {
+      final dir = await getTemporaryDirectory();
+      final f = File('${dir.path}/vault_enc_$fileId.bin');
+      await f.writeAsBytes(bytes, flush: true);
+      _cachedFileIds.add(fileId);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_cacheKeyBlobIds, _cachedFileIds.toList());
+    } catch (_) {}
+  }
+
+  Future<void> _deleteEncryptedBlobFromDisk(String fileId) async {
+    try {
+      final dir = await getTemporaryDirectory();
+      final f = File('${dir.path}/vault_enc_$fileId.bin');
+      if (await f.exists()) {
+        await f.delete();
+      }
+      _cachedFileIds.remove(fileId);
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_cacheKeyBlobIds, _cachedFileIds.toList());
+    } catch (_) {}
+  }
+
+  Future<void> _purgeEncryptedBlobFiles() async {
+    try {
+      final dir = await getTemporaryDirectory();
+      for (final id in _cachedFileIds) {
+        final f = File('${dir.path}/vault_enc_$id.bin');
+        if (await f.exists()) {
+          await f.delete();
+        }
+      }
+    } catch (_) {}
   }
 
   /// Internal: update file metadata on server and in local state.
@@ -842,10 +1019,22 @@ class VaultProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> deleteFilePermanently(VaultFile file) async {
+    await _api!.deleteFile(file.id);
+    _files.removeWhere((f) => f.id == file.id);
+    if (_selectedFile?.id == file.id) {
+      _selectedFile = null;
+    }
+    await _deleteEncryptedBlobFromDisk(file.id);
+    await _saveToCache();
+    notifyListeners();
+  }
+
   /// Resolve folder name from ID.
   String folderName(String folderId) {
     const builtins = {
       'inbox': 'Inbox',
+      'all': 'All Files',
       'starred': 'Starred',
       'documents': 'Documents',
       'photos': 'Photos',
@@ -866,12 +1055,14 @@ class VaultProvider extends ChangeNotifier {
     _files = [];
     _folders = [];
     _selectedFile = null;
-    _currentFolder = 'inbox';
+    _currentFolder = 'all';
     _uploadQueue = [];
     _sidebarOpen = false;
     _needsRecovery = false;
     _recoveryFileRows = [];
     _recoveryFolderRows = [];
+    _isCreatingFolder = false;
+    _cachedFileIds.clear();
     notifyListeners();
   }
 }
