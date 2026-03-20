@@ -114,6 +114,12 @@ function App() {
 
   const [files, setFiles] = useState([]);
   const [folders, setFolders] = useState([]);
+  const [cloudinaryUsage, setCloudinaryUsage] = useState({
+    loading: false,
+    error: '',
+    credits: null,
+    storage: null,
+  });
   const [isLoading, setIsLoading] = useState(false);
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
   const [isDragActive, setIsDragActive] = useState(false);
@@ -611,6 +617,56 @@ function App() {
     setSelectedFile(null);
   };
 
+  const fetchCloudinaryUsage = async () => {
+    if (!vaultContext) return;
+
+    setCloudinaryUsage((prev) => ({ ...prev, loading: true, error: '' }));
+    try {
+      const res = await fetch('/api/cloudinary-usage', {
+        headers: {
+          Authorization: `Bearer ${vaultContext.authPassword}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error('Unavailable');
+      }
+
+      const data = await res.json();
+      const usage = data?.usage || {};
+      setCloudinaryUsage({
+        loading: false,
+        error: '',
+        credits: {
+          used: usage?.credits?.used,
+          limit: usage?.credits?.limit,
+        },
+        storage: {
+          usedBytes: usage?.storage?.used_bytes,
+          limitBytes: usage?.storage?.limit_bytes,
+        },
+      });
+    } catch (_) {
+      setCloudinaryUsage((prev) => ({
+        ...prev,
+        loading: false,
+        error: 'Usage unavailable',
+      }));
+    }
+  };
+
+  useEffect(() => {
+    if (!vaultContext) return;
+    fetchCloudinaryUsage();
+  }, [vaultContext]);
+
+  const vaultStats = {
+    decryptableFileCount: files.filter((f) => f.folderId !== 'trash').length,
+    decryptableBytes: files
+      .filter((f) => f.folderId !== 'trash')
+      .reduce((sum, f) => sum + (Number(f.size) || 0), 0),
+  };
+
   return (
     <div className={styles.appContainer}>
       <button
@@ -644,6 +700,9 @@ function App() {
         customFolders={folders}
         vaultContext={vaultContext}
         onFolderCreateSuccess={handleFolderCreateSuccess}
+        vaultStats={vaultStats}
+        cloudinaryUsage={cloudinaryUsage}
+        onRefreshUsage={fetchCloudinaryUsage}
         isMobileOpen={isSidebarOpen}
         onCloseMobile={() => setIsSidebarOpen(false)}
       />

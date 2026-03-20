@@ -4,6 +4,14 @@ import clsx from 'clsx';
 import { useState } from 'react';
 import FolderModal from './FolderModal';
 
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const idx = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+  const value = bytes / 1024 ** idx;
+  return `${value.toFixed(idx === 0 ? 0 : value >= 100 ? 0 : value >= 10 ? 1 : 2)} ${units[idx]}`;
+}
+
 function FolderTreeItem({ folder, currentFolder, onSelectFolder, customFolders, depth = 0, onCreateSubfolder }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const children = customFolders.filter(f => f.parentId === folder.id);
@@ -57,7 +65,19 @@ function FolderTreeItem({ folder, currentFolder, onSelectFolder, customFolders, 
   );
 }
 
-export default function Sidebar({ currentFolder, onSelectFolder, onOpenSettings, customFolders = [], vaultContext, onFolderCreateSuccess, isMobileOpen = false, onCloseMobile }) {
+export default function Sidebar({
+  currentFolder,
+  onSelectFolder,
+  onOpenSettings,
+  customFolders = [],
+  vaultContext,
+  onFolderCreateSuccess,
+  vaultStats,
+  cloudinaryUsage,
+  onRefreshUsage,
+  isMobileOpen = false,
+  onCloseMobile,
+}) {
   const [folderModalState, setFolderModalState] = useState({ isOpen: false, parentId: null });
 
   const defaultFolders = [
@@ -146,6 +166,48 @@ export default function Sidebar({ currentFolder, onSelectFolder, onOpenSettings,
       </nav>
 
       <div className={styles.footer}>
+        <div className={styles.usageCard}>
+          <div className={styles.usageHeader}>
+            <span className={styles.usageTitle}>Vault Usage</span>
+            <button
+              className={styles.usageRefreshBtn}
+              onClick={onRefreshUsage}
+              disabled={cloudinaryUsage?.loading}
+              title="Refresh cloud usage"
+            >
+              {cloudinaryUsage?.loading ? '...' : '↻'}
+            </button>
+          </div>
+          <div className={styles.usageRow}>
+            <span>Decryptable Files</span>
+            <strong>{vaultStats?.decryptableFileCount ?? 0}</strong>
+          </div>
+          <div className={styles.usageRow}>
+            <span>Vault Size</span>
+            <strong>{formatBytes(vaultStats?.decryptableBytes ?? 0)}</strong>
+          </div>
+          <div className={styles.usageRow}>
+            <span>Cloudinary Credits</span>
+            <strong>
+              {cloudinaryUsage?.error
+                ? 'Unavailable'
+                : cloudinaryUsage?.credits?.used != null && cloudinaryUsage?.credits?.limit != null
+                  ? `${cloudinaryUsage.credits.used}/${cloudinaryUsage.credits.limit}`
+                  : 'Unknown'}
+            </strong>
+          </div>
+          <div className={styles.usageRow}>
+            <span>Cloudinary Storage</span>
+            <strong>
+              {cloudinaryUsage?.error
+                ? 'Unavailable'
+                : cloudinaryUsage?.storage?.usedBytes != null && cloudinaryUsage?.storage?.limitBytes != null
+                  ? `${formatBytes(cloudinaryUsage.storage.usedBytes)} / ${formatBytes(cloudinaryUsage.storage.limitBytes)}`
+                  : 'Unknown'}
+            </strong>
+          </div>
+        </div>
+
         <button
           className={clsx(styles.button, currentFolder === 'settings' && styles.active)}
           onClick={onOpenSettings}

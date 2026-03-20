@@ -130,6 +130,7 @@ All design tokens are defined in `src/index.css` `:root`. Components reference C
 - `src/App.jsx` — Also contains the web vault recovery UI/workflow: detects decryption mismatch after successful auth, prompts for previous password, then re-encrypts all file blobs + metadata and folder metadata.
 - `src/components/Sidebar.jsx` + `src/components/FileList.jsx` — Web now includes an **All Files** view (`folderId: all`) that aggregates all decryptable non-trash files across folders.
 - `src/components/RecoverySettings.jsx` — Web-only settings panel for per-entry recovery: scans for file rows that fail decryption with current key, lets user provide previous password for one selected entry, decrypts + re-encrypts that item, and writes updated blob+metadata.
+- `src/components/Sidebar.jsx` — Also includes a web usage card showing decryptable file count, decryptable total size, and Cloudinary credits/storage usage.
 - `src/components/MasterPassword.jsx` — Unlock screen with master password input and key derivation.
 - `src/components/Sidebar.jsx` — Navigation sidebar with default folders, recursive `FolderTreeItem` for custom folder hierarchy, expand/collapse, subfolder creation.
 - `src/components/FileList.jsx` — File table with star toggle, click-to-open (PDF -> preview, others -> detail), context menu (preview, details, rename, move, copy, trash), download.
@@ -153,6 +154,7 @@ All design tokens are defined in `src/index.css` `:root`. Components reference C
 
 ### Server API (Vercel Serverless)
 - `api/cloudinary-config.js` — Returns Cloudinary upload settings (`cloudName`, unsigned `uploadPreset`, `resourceType`) after Bearer auth for direct client uploads.
+- `api/cloudinary-usage.js` — Returns Cloudinary Admin API usage metrics (`credits`, `storage`) after Bearer auth for web usage display.
 - `api/upload.js` — Parses encrypted file upload via `formidable` and pushes to Cloudinary.
 - `api/files.js` — Turso DB endpoints for file records (GET, POST, PUT). `PUT` supports optional `cloudinary_url` updates for migration.
 - `api/folders.js` — Turso DB endpoints for folder records (GET, POST, PUT).
@@ -297,6 +299,7 @@ Main layout with responsive behavior:
 - **Note:** `flutter analyze` and `flutter test` have `continue-on-error: true` to not block APK builds during initial development.
 
 ### Known Issues & Future Work
+- **Web usage metrics added (Mar 2026):** Sidebar now displays decryptable file count + total decryptable size, plus Cloudinary credits/storage usage with manual refresh and graceful fallback to “Unavailable.”
 - **Mobile ciphertext truncation bug fixed (Mar 2026):** `CryptoService._aesGcmEncrypt` now returns only `len + finalLen` bytes from PointyCastle output. This fixes Android uploads that previously produced invalid ciphertext/tag bytes, causing decrypt failures and records disappearing after refresh (including web decryption failure).
 - **Mobile UX and navigation upgrades (Mar 2026):** Added All Files section, animated mobile sidebar open, folder creation loading states, and + action sheet for upload/create folder from file list.
 - **Mobile folder management in file list (Mar 2026):** Subfolders now render in file list for the active folder and support rename/move actions from long-press.
